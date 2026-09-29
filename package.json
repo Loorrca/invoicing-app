@@ -1,0 +1,39 @@
+{
+  "name": "invoicing-app",
+  "version": "1.0.0",
+  "description": "Application de facturation avec tableau de bord et generation de factures PDF",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c blue,green \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build:renderer": "vite build",
+    "start": "npm run build:renderer && electron .",
+    "dist": "npm run build:renderer && electron-builder"
+  },
+  "keywords": [],
+  "author": "Hamma",
+  "license": "ISC",
+  "private": true,
+  "type": "commonjs",
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.4",
+    "cross-env": "^7.0.3",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.21",
+    "wait-on": "^8.0.5"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "tn.bouzidi.facturation",
+    "productName": "Facturation",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "electron/**/*", "package.json"],
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" },
+    "mac": { "target": "dmg" }
+  }
+}

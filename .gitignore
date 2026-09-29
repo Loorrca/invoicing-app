@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+test-output/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

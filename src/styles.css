@@ -325,6 +325,108 @@ table.invoices-table td.num { text-align: right; }
   margin-bottom: 10px;
 }
 
+.page-wide { max-width: 980px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px 20px;
+  margin-bottom: 20px;
+}
+
+.card .section-title { margin-top: 0; }
+
+.dashboard-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-card-header .section-title { margin-bottom: 0; }
+
+.dashboard-grid { margin-bottom: 0; }
+.dashboard-grid .card { margin-bottom: 20px; }
+
+.kpi-row {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.stat-tile {
+  flex: 1 1 200px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.stat-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.stat-delta {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stat-delta.up { color: #006300; }
+.stat-delta.down { color: var(--danger); }
+
+.chart-scroll { overflow-x: auto; }
+
+.hbar-chart { display: flex; flex-direction: column; gap: 10px; }
+
+.hbar-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 40%) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border-radius: 4px;
+}
+
+.hbar-label {
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hbar-track {
+  background: #f0efec;
+  border-radius: 4px;
+  height: 16px;
+  overflow: hidden;
+}
+
+.hbar-fill {
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  min-width: 2px;
+}
+
+.hbar-value {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .totaux-preview {
   align-self: flex-end;
   min-width: 260px;

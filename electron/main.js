@@ -65,7 +65,8 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    // Outils de developpement disponibles a la demande (Ctrl+Shift+I), plus
+    // ouverts automatiquement a chaque lancement.
   } else {
     mainWindow.loadURL("app://bundle/index.html");
   }

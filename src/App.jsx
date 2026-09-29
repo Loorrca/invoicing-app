@@ -3,9 +3,11 @@ import Settings from "./pages/Settings.jsx";
 import NewInvoice from "./pages/NewInvoice.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
 import Productions from "./pages/Productions.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
+  { id: "dashboard", label: "Tableau de bord" },
   { id: "invoice", label: "Nouvelle facture" },
   { id: "invoices", label: "Factures" },
   { id: "productions", label: "Productions" },
@@ -106,6 +108,9 @@ export default function App() {
           />
         )}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
+        {tab === "dashboard" && (
+          <Dashboard key={activeCompany?.id} onGoToInvoices={() => setTab("invoices")} />
+        )}
       </main>
     </div>
   );

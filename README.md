@@ -16,7 +16,36 @@ qui fait tourner l'application.
   — ca arrive avec la prochaine fonctionnalite (creation/suivi des factures,
   puis le tableau de bord, puis l'integration avec le suivi des reglements).
 
-## Installation
+## Telecharger l'installeur Windows (le plus simple, sans rien installer)
+
+Pas besoin de Node.js ni de `npm install` pour simplement utiliser
+l'application : un installeur `.exe` pret a l'emploi est construit
+automatiquement par GitHub a chaque nouvelle version.
+
+1. Aller sur la page **Releases** du depot GitHub (colonne de droite sur la
+   page principale du depot, ou `https://github.com/Loorrca/invoicing-app/releases`).
+2. Telecharger le fichier `Facturation Setup x.x.x.exe` de la derniere
+   version.
+3. Le lancer et suivre l'installation. Windows SmartScreen peut afficher un
+   avertissement au premier lancement ("Windows a protege votre
+   ordinateur") car l'installeur n'est pas signe numeriquement — c'est
+   normal, cliquer sur **Informations complementaires -> Executer quand
+   meme**.
+
+S'il n'y a pas encore de Release publiee, un installeur peut aussi etre
+recupere manuellement : onglet **Actions** du depot -> workflow
+**"Build Windows installer"** -> **Run workflow** -> une fois termine,
+telecharger l'artifact `facturation-windows-installer` sur la page du run.
+
+Pour publier une nouvelle Release (avec l'installeur attache
+automatiquement), il suffit de pousser un tag `vX.Y.Z` :
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+## Installation (pour developper sur le projet)
 
 Necessite [Node.js](https://nodejs.org/) (version 20 ou plus recente).
 

@@ -1,6 +1,11 @@
 "use strict";
 
-const { montantEnLettresDT } = require("./numberToWords");
+// Gabarit "Classique" (noir et blanc) : le tout premier gabarit de l'appli,
+// utilise historiquement pour MASTERFLAG. Ne pas modifier son rendu visuel
+// sans le demander explicitement : d'autres entreprises peuvent s'y fier.
+
+const { montantEnLettresDT } = require("../numberToWords");
+const { calculerTotaux } = require("../calculerTotaux");
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({
@@ -25,15 +30,6 @@ function formatDate(d) {
   const date = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
-
-function calculerTotaux(lignes, avecFodec) {
-  const ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
-  const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
-  const ttc = ht + fodec + tva;
-  const arrondir = (n) => Math.round(n * 1000) / 1000;
-  return { ht: arrondir(ht), fodec: arrondir(fodec), tva: arrondir(tva), ttc: arrondir(ttc) };
 }
 
 /**
@@ -241,4 +237,4 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
 </html>`;
 }
 
-module.exports = { renderInvoiceHtml, calculerTotaux };
+module.exports = { renderInvoiceHtml };

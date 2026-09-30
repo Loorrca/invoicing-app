@@ -61,7 +61,7 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   }).join("");
 
   // Complete la table a une hauteur minimale, comme sur le gabarit existant.
-  const lignesVides = Math.max(0, 8 - lignes.length);
+  const lignesVides = Math.max(0, 9 - lignes.length);
   const videsHtml = Array.from({ length: lignesVides }, () => `
       <tr><td class="num">&nbsp;</td><td class="designation">&nbsp;</td><td class="num">&nbsp;</td><td class="num">&nbsp;</td></tr>`).join("");
 
@@ -92,8 +92,8 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
     justify-content: space-between;
     align-items: flex-start;
     border-bottom: 2px solid #1a1a1a;
-    padding-bottom: 10mm;
-    margin-bottom: 8mm;
+    padding-bottom: 7mm;
+    margin-bottom: 6mm;
   }
   .company { display: flex; gap: 4mm; align-items: flex-start; }
   .company img { max-height: 22mm; max-width: 45mm; object-fit: contain; }
@@ -106,7 +106,7 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   }
   .invoice-meta .line { font-size: 10.5pt; margin: 0.5mm 0; }
   .client-block {
-    display: flex; justify-content: space-between; margin-bottom: 8mm;
+    display: flex; justify-content: space-between; margin-bottom: 6mm;
   }
   .client-block .box {
     border: 1px solid #ccc; border-radius: 2mm; padding: 3mm 4mm; min-width: 65mm;
@@ -124,26 +124,26 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   }
   table.lignes th.num, table.lignes td.num { text-align: right; }
   table.lignes td {
-    padding: 2mm 3mm; border-bottom: 1px solid #e5e5e5; font-size: 10.5pt;
+    padding: 1.6mm 3mm; border-bottom: 1px solid #e5e5e5; font-size: 10.5pt;
   }
-  .totaux { display: flex; justify-content: flex-end; margin-bottom: 6mm; }
+  .totaux { display: flex; justify-content: flex-end; margin-bottom: 4mm; }
   .totaux table { border-collapse: collapse; min-width: 70mm; }
   .totaux td { padding: 1.5mm 3mm; font-size: 10.5pt; }
   .totaux td.label { color: #555; }
   .totaux td.val { text-align: right; font-variant-numeric: tabular-nums; }
   .totaux tr.ttc td { border-top: 1.5px solid #1a1a1a; font-weight: 700; font-size: 12pt; }
   .lettres {
-    border: 1px solid #ccc; border-radius: 2mm; padding: 3mm 4mm;
-    font-size: 10pt; font-style: italic; margin-bottom: 8mm;
+    border: 1px solid #ccc; border-radius: 2mm; padding: 2.5mm 4mm;
+    font-size: 10pt; font-style: italic; margin-bottom: 6mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .signature-row {
-    display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 10mm;
+    display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 7mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .signature-box {
     flex: 1 1 0;
-    min-height: 28mm;
+    min-height: 24mm;
     border: 1px solid #ccc; border-radius: 2mm;
     padding: 2mm 4mm;
     break-inside: avoid; page-break-inside: avoid;

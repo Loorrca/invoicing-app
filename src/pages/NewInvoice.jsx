@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Calculatrice from "../components/Calculatrice.jsx";
 
 const NOUVEL_ARTICLE = "__new__";
 
@@ -39,6 +40,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
   // { rowIndex, designation, prixUnitaire } quand la petite fenetre d'ajout
   // d'article est ouverte, sinon null.
   const [newArticle, setNewArticle] = useState(null);
+  const [showCalc, setShowCalc] = useState(false);
 
   useEffect(() => {
     window.api.listArticles().then(setArticles).catch(() => {});
@@ -191,12 +193,19 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
 
   return (
     <div className="page">
-      <h1>{editingId ? "Modifier la facture" : "Nouvelle facture"}</h1>
-      <p className="subtitle">
-        {editingId
-          ? "Modifiez les informations puis enregistrez : le PDF existant sera remplace."
-          : "Remplir les informations puis generer le PDF. Il est enregistre automatiquement dans le dossier Factures."}
-      </p>
+      <div className="page-header-row">
+        <div>
+          <h1>{editingId ? "Modifier la facture" : "Nouvelle facture"}</h1>
+          <p className="subtitle">
+            {editingId
+              ? "Modifiez les informations puis enregistrez : le PDF existant sera remplace."
+              : "Remplir les informations puis generer le PDF. Il est enregistre automatiquement dans le dossier Factures."}
+          </p>
+        </div>
+        <button type="button" className="btn secondary" onClick={() => setShowCalc(true)}>
+          Calculatrice P.H.T / P.T.T.C
+        </button>
+      </div>
 
       <form className="form" onSubmit={handleGenerate}>
         <div className="grid-2">
@@ -333,6 +342,8 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
           )}
         </div>
       </form>
+
+      {showCalc && <Calculatrice avecFodecParDefaut={avecFodec} onClose={() => setShowCalc(false)} />}
 
       {newArticle && (
         <div className="modal-overlay" onClick={() => setNewArticle(null)}>

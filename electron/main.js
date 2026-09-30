@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -51,6 +51,86 @@ function registerAppProtocol() {
   });
 }
 
+// Barre de menu (menu natif de la fenetre : Fichier / Edition / Affichage /
+// Aide). Sans ceci, Electron affiche son menu par defaut en anglais ; on le
+// remplace ici pour qu'il soit dans la langue de l'app et pour y ajouter
+// l'entree "A propos" (credit/copyright).
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "Fichier",
+      submenu: [isMac ? { role: "close" } : { role: "quit", label: "Quitter" }],
+    },
+    {
+      label: "Edition",
+      submenu: [
+        { role: "undo", label: "Annuler" },
+        { role: "redo", label: "Retablir" },
+        { type: "separator" },
+        { role: "cut", label: "Couper" },
+        { role: "copy", label: "Copier" },
+        { role: "paste", label: "Coller" },
+        { role: "selectAll", label: "Tout selectionner" },
+      ],
+    },
+    {
+      label: "Affichage",
+      submenu: [
+        { role: "reload", label: "Recharger" },
+        { role: "forceReload", label: "Recharger (forcer)" },
+        { role: "toggleDevTools", label: "Outils de developpement" },
+        { type: "separator" },
+        { role: "resetZoom", label: "Zoom normal" },
+        { role: "zoomIn", label: "Zoom avant" },
+        { role: "zoomOut", label: "Zoom arriere" },
+        { type: "separator" },
+        { role: "togglefullscreen", label: "Plein ecran" },
+      ],
+    },
+    {
+      label: "Aide",
+      submenu: [
+        {
+          label: "A propos de Facturation",
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: "info",
+              title: "A propos de Facturation",
+              message: "Facturation",
+              detail:
+                "Application de facturation et de suivi des paiements.\n\n" +
+                "© Mohamed Bouzidi 2026\nTous droits reserves.",
+              buttons: ["Fermer"],
+            });
+          },
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -81,6 +161,7 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), app.getPath("documents"));
   initBackup(app.getPath("userData"), app.getPath("documents"));
+  buildMenu();
   createWindow();
 
   app.on("activate", () => {

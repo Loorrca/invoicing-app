@@ -283,6 +283,34 @@ table.lignes-editor select:hover { border-color: var(--border); }
 .modal .section-title { margin: 0; }
 .modal .actions { margin-top: 4px; }
 
+.modal.calc-modal { width: 440px; }
+
+.calc-subtitle { margin: -6px 0 0; }
+
+.calc-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.calc-result { align-self: stretch; }
+
+.calc-reponse span { color: var(--accent); font-weight: 700; }
+.totaux-preview .ttc.calc-reponse { color: var(--accent); }
+.totaux-preview .ttc.calc-reponse span { color: var(--accent); }
+
+.page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-header-row .subtitle { margin-bottom: 0; }
+
 .invoices-search-row {
   display: flex;
   align-items: center;

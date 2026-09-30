@@ -24,9 +24,9 @@ Necessite [Node.js](https://nodejs.org/) (version 20 ou plus recente).
 npm install
 ```
 
-Cette commande installe aussi Electron et recompile `better-sqlite3` (base
-de donnees) pour la version d'Electron utilisee — c'est fait automatiquement
-par le script `postinstall`, rien a faire de plus.
+Toutes les dependances sont en JavaScript pur (pas de module natif a
+compiler) : les donnees sont stockees dans de simples fichiers JSON, et la
+lecture des releves bancaires PDF/XLSX utilise `pdfjs-dist`/`xlsx`.
 
 ## Lancer en developpement
 
@@ -37,25 +37,51 @@ npm run dev
 Ouvre la fenetre de l'application avec rechargement a chaud sur les
 modifications de l'interface.
 
+## Lancer sur Windows
+
+1. Installer [Node.js LTS](https://nodejs.org/) (le programme d'installation
+   inclut npm) et [Git for Windows](https://git-scm.com/download/win) (ou
+   utiliser GitHub Desktop).
+2. Cloner le depot :
+   ```bash
+   git clone <url-du-depot-github>
+   cd invoicing-app
+   ```
+3. Installer les dependances :
+   ```bash
+   npm install
+   ```
+   (premiere execution : necessite internet, Electron est telecharge
+   automatiquement — rien de natif a compiler)
+4. Lancer l'application :
+   ```bash
+   npm run dev
+   ```
+
+Les donnees (entreprises, factures, catalogue d'articles) sont propres a
+chaque machine : elles vivent dans `%APPDATA%\invoicing-app` (fichiers JSON)
+et dans `Documents\Facturation\` (PDF de factures et releves BIAT).
+
 ## Construire l'application (executable)
+
+Pour installer l'application une bonne fois sur un poste (sans avoir a
+relancer `npm run dev` a chaque fois) :
 
 ```bash
 npm run dist
 ```
 
 Produit un installeur dans `release/` :
-- `win` -> `.exe` (NSIS) — a lancer **sur une machine Windows** (ou une
-  machine Windows via `npm run dist` directement dessus ; la compilation
-  croisee depuis Linux vers Windows n'est pas garantie ici a cause du module
-  natif `better-sqlite3`, qui doit etre compile pour la plateforme cible).
+- `win` -> `Facturation Setup x.x.x.exe` (NSIS)
 - `linux` -> `.AppImage`
 - `mac` -> `.dmg`
 
-**En pratique** : pour livrer la version Windows destinee au PC de
-l'entreprise, le plus simple est d'installer Node.js sur ce PC Windows, d'y
-copier ce dossier de code (sans `node_modules/`), et d'y lancer
-`npm install` puis `npm run dist`. C'est ce qui garantit que le module de
-base de donnees natif correspond bien a Windows.
+A executer directement sur la plateforme ciblee (le plus simple pour un
+`.exe` Windows reste de lancer `npm run dist` sur une machine Windows).
+L'installeur n'etant pas signe numeriquement, Windows SmartScreen affiche un
+avertissement au premier lancement ("Windows a protege votre ordinateur") —
+c'est normal pour une application non signee, cliquer sur **Informations
+complementaires -> Executer quand meme**.
 
 ## Organisation
 

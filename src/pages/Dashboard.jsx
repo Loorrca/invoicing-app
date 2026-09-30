@@ -151,9 +151,10 @@ function StatTile({ label, value, delta }) {
   );
 }
 
-export default function Dashboard({ onGoToInvoices }) {
+export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [paiements, setPaiements] = useState(null);
 
   useEffect(() => {
     window.api
@@ -163,6 +164,10 @@ export default function Dashboard({ onGoToInvoices }) {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    window.api
+      .scanPayments()
+      .then((res) => setPaiements(res?.ok ? res : null))
+      .catch(() => setPaiements(null));
   }, []);
 
   const stats = useMemo(() => {
@@ -247,6 +252,22 @@ export default function Dashboard({ onGoToInvoices }) {
         <h2 className="section-title">Evolution du chiffre d'affaires (HT)</h2>
         <EvolutionChart months={stats.months} />
       </div>
+
+      {paiements && (
+        <div className="card">
+          <div className="dashboard-card-header">
+            <h2 className="section-title">Suivi des paiements (rapprochement BIAT)</h2>
+            <button type="button" className="btn secondary" onClick={() => onGoToPaiements?.()}>
+              Voir les paiements
+            </button>
+          </div>
+          <div className="kpi-row" style={{ marginBottom: 0 }}>
+            <StatTile label="Total encaissé" value={fmtMoney(paiements.recap.totalEncaisse)} />
+            <StatTile label="Reste à encaisser" value={fmtMoney(paiements.recap.resteAEncaisser)} />
+            <StatTile label="Factures à vérifier" value={fmtQty(paiements.recap.nbAVerifier)} />
+          </div>
+        </div>
+      )}
 
       <div className="grid-2 dashboard-grid">
         <div className="card">

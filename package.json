@@ -20,20 +20,38 @@
     "cross-env": "^7.0.3",
     "electron": "33.4.11",
     "electron-builder": "^25.1.8",
+    "playwright-core": "1.49",
     "vite": "^5.4.21",
     "wait-on": "^8.0.5"
   },
   "dependencies": {
+    "pdfjs-dist": "^4.0.379",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
   },
   "build": {
     "appId": "tn.bouzidi.facturation",
     "productName": "Facturation",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "electron/**/*", "package.json"],
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage" },
-    "mac": { "target": "dmg" }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/pdfjs-dist/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg"
+    }
   }
 }

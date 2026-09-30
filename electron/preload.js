@@ -18,4 +18,9 @@ contextBridge.exposeInMainWorld("api", {
   updateAndSaveInvoice: (id, invoice) => ipcRenderer.invoke("invoice:updateAndSave", { id, invoice }),
   openInvoicePdf: (id) => ipcRenderer.invoke("invoice:openPdf", id),
   renderInvoiceHtml: (invoice) => ipcRenderer.invoke("invoice:renderHtml", invoice),
+  scanPayments: () => ipcRenderer.invoke("payments:scan"),
+  verifyPayment: (invoiceId, operationKey, confirmer) =>
+    ipcRenderer.invoke("payments:verify", { invoiceId, operationKey, confirmer }),
+  getPaymentsFolderPath: () => ipcRenderer.invoke("payments:getFolderPath"),
+  openPaymentsFolder: () => ipcRenderer.invoke("payments:openFolder"),
 });

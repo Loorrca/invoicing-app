@@ -23,6 +23,7 @@ const {
   deleteInvoice,
 } = require("./invoices");
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
+const { initPayments, releveDirFor, scanPayments, verifyPayment } = require("./payments");
 
 const isDev = !app.isPackaged;
 
@@ -77,6 +78,7 @@ app.whenReady().then(() => {
   initDb(app.getPath("userData"));
   initArticles(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
+  initPayments(app.getPath("userData"), app.getPath("documents"));
   createWindow();
 
   app.on("activate", () => {
@@ -273,4 +275,35 @@ ipcMain.handle("invoice:openPdf", async (_event, id) => {
 ipcMain.handle("invoice:renderHtml", (_event, invoice) => {
   const company = getActiveCompany();
   return renderInvoiceHtml(company, invoice);
+});
+
+// --------------------------------------------------------------------------
+// IPC : suivi des reglements (rapprochement bancaire BIAT)
+// --------------------------------------------------------------------------
+
+// Chaque entreprise a son propre dossier de relevés, cree a la demande, sur
+// le meme modele que Documents/Facturation/Factures/<Entreprise>/.
+ipcMain.handle("payments:scan", async () => {
+  const company = getActiveCompany();
+  const invoices = listInvoices(company.id);
+  try {
+    return { ok: true, ...(await scanPayments(company, invoices)) };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle("payments:verify", (_event, { invoiceId, operationKey, confirmer }) => {
+  const company = getActiveCompany();
+  verifyPayment(company.id, invoiceId, operationKey, confirmer);
+  return true;
+});
+
+ipcMain.handle("payments:getFolderPath", () => releveDirFor(getActiveCompany()));
+
+ipcMain.handle("payments:openFolder", async () => {
+  const dir = releveDirFor(getActiveCompany());
+  const result = await shell.openPath(dir);
+  if (result) return { opened: false, error: result };
+  return { opened: true };
 });

@@ -4,6 +4,7 @@ import NewInvoice from "./pages/NewInvoice.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
 import Productions from "./pages/Productions.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import Paiements from "./pages/Paiements.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
@@ -11,6 +12,7 @@ const TABS = [
   { id: "invoice", label: "Nouvelle facture" },
   { id: "invoices", label: "Factures" },
   { id: "productions", label: "Productions" },
+  { id: "paiements", label: "Paiements" },
 ];
 
 const ADD_COMPANY = "__add__";
@@ -108,8 +110,13 @@ export default function App() {
           />
         )}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
+        {tab === "paiements" && <Paiements key={activeCompany?.id} />}
         {tab === "dashboard" && (
-          <Dashboard key={activeCompany?.id} onGoToInvoices={() => setTab("invoices")} />
+          <Dashboard
+            key={activeCompany?.id}
+            onGoToInvoices={() => setTab("invoices")}
+            onGoToPaiements={() => setTab("paiements")}
+          />
         )}
       </main>
     </div>

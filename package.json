@@ -34,6 +34,7 @@
     "appId": "tn.bouzidi.facturation",
     "productName": "Facturation",
     "npmRebuild": false,
+    "publish": null,
     "directories": {
       "output": "release"
     },

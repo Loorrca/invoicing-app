@@ -137,11 +137,12 @@ function HorizontalBars({ data, formatValue }) {
   );
 }
 
-function StatTile({ label, value, delta }) {
+function StatTile({ label, value, subValue, delta }) {
   return (
     <div className="stat-tile">
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
+      {subValue && <div className="stat-subvalue">{subValue}</div>}
       {delta !== null && delta !== undefined && (
         <div className={`stat-delta ${delta >= 0 ? "up" : "down"}`}>
           {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}% vs mois precedent
@@ -174,16 +175,26 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
     const monthTotals = new Map();
     let earliestIdx = null;
     let totalHT = 0;
+    let totalTTC = 0;
+    let totalTVA = 0;
+    const monthTotalsTva = new Map();
+    const monthTotalsTtc = new Map();
     const clientTotals = new Map();
     const productTotals = new Map();
 
     for (const f of invoices) {
       const ht = f.totaux?.ht || 0;
+      const tva = f.totaux?.tva || 0;
+      const ttc = f.totaux?.ttc || 0;
       totalHT += ht;
+      totalTTC += ttc;
+      totalTVA += tva;
 
       const idx = ymIndex(f.date);
       if (idx !== null) {
         monthTotals.set(idx, (monthTotals.get(idx) || 0) + ht);
+        monthTotalsTva.set(idx, (monthTotalsTva.get(idx) || 0) + tva);
+        monthTotalsTtc.set(idx, (monthTotalsTtc.get(idx) || 0) + ttc);
         if (earliestIdx === null || idx < earliestIdx) earliestIdx = idx;
       }
 
@@ -203,13 +214,22 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
     const startIdx = earliestIdx !== null && earliestIdx > twelveAgoIdx ? earliestIdx : twelveAgoIdx;
 
     const months = [];
+    const moisTva = [];
     for (let idx = startIdx; idx <= nowIdx; idx++) {
       months.push({ label: ymLabel(idx), value: monthTotals.get(idx) || 0 });
+      moisTva.push({
+        idx,
+        label: ymLabel(idx),
+        ht: monthTotals.get(idx) || 0,
+        tva: monthTotalsTva.get(idx) || 0,
+        ttc: monthTotalsTtc.get(idx) || 0,
+      });
     }
 
     const thisMonthHT = monthTotals.get(nowIdx) || 0;
     const prevMonthHT = monthTotals.get(nowIdx - 1) || 0;
     const delta = prevMonthHT > 0 ? ((thisMonthHT - prevMonthHT) / prevMonthHT) * 100 : null;
+    const thisMonthTVA = monthTotalsTva.get(nowIdx) || 0;
 
     const topClients = [...clientTotals.entries()]
       .map(([label, value]) => ({ label, value }))
@@ -221,7 +241,19 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    return { totalHT, months, thisMonthHT, prevMonthHT, delta, topClients, topProducts };
+    return {
+      totalHT,
+      totalTTC,
+      totalTVA,
+      thisMonthTVA,
+      months,
+      moisTva,
+      thisMonthHT,
+      prevMonthHT,
+      delta,
+      topClients,
+      topProducts,
+    };
   }, [invoices]);
 
   if (loading) return <div className="page">Chargement...</div>;
@@ -243,7 +275,11 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
       <p className="subtitle">Vue d'ensemble de l'entreprise active.</p>
 
       <div className="kpi-row">
-        <StatTile label="Chiffre d'affaires total (HT)" value={fmtMoney(stats.totalHT)} />
+        <StatTile
+          label="Chiffre d'affaires total (HT)"
+          value={fmtMoney(stats.totalHT)}
+          subValue={`TTC : ${fmtMoney(stats.totalTTC)}`}
+        />
         <StatTile label="Ce mois-ci (HT)" value={fmtMoney(stats.thisMonthHT)} delta={stats.delta} />
         <StatTile label="Mois precedent (HT)" value={fmtMoney(stats.prevMonthHT)} />
       </div>
@@ -251,6 +287,40 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
       <div className="card">
         <h2 className="section-title">Evolution du chiffre d'affaires (HT)</h2>
         <EvolutionChart months={stats.months} />
+      </div>
+
+      <div className="card">
+        <h2 className="section-title">TVA collectée</h2>
+        <div className="kpi-row" style={{ marginBottom: 14 }}>
+          <StatTile label="TVA collectée (total)" value={fmtMoney(stats.totalTVA)} />
+          <StatTile label="TVA collectée (ce mois-ci)" value={fmtMoney(stats.thisMonthTVA)} />
+        </div>
+        <div className="table-scroll">
+          <table className="invoices-table">
+            <thead>
+              <tr>
+                <th>Mois</th>
+                <th className="num">Chiffre d'affaires HT</th>
+                <th className="num">TVA collectée</th>
+                <th className="num">Total TTC</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...stats.moisTva].reverse().map((m) => (
+                <tr key={m.idx}>
+                  <td>{m.label}</td>
+                  <td className="num">{fmtMoney(m.ht)}</td>
+                  <td className="num">{fmtMoney(m.tva)}</td>
+                  <td className="num">{fmtMoney(m.ttc)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="payments-folder-hint">
+          Pense-bête pour la déclaration mensuelle de TVA : la TVA collectée sur les factures émises ce
+          mois-ci, avant déduction de la TVA payée sur vos propres achats.
+        </p>
       </div>
 
       {paiements && (

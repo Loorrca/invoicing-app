@@ -5,6 +5,7 @@ import InvoicesList from "./pages/InvoicesList.jsx";
 import Productions from "./pages/Productions.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Paiements from "./pages/Paiements.jsx";
+import Sauvegarde from "./pages/Sauvegarde.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
@@ -13,6 +14,7 @@ const TABS = [
   { id: "invoices", label: "Factures" },
   { id: "productions", label: "Productions" },
   { id: "paiements", label: "Paiements" },
+  { id: "sauvegarde", label: "Sauvegarde" },
 ];
 
 const ADD_COMPANY = "__add__";
@@ -111,6 +113,7 @@ export default function App() {
         )}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
         {tab === "paiements" && <Paiements key={activeCompany?.id} />}
+        {tab === "sauvegarde" && <Sauvegarde />}
         {tab === "dashboard" && (
           <Dashboard
             key={activeCompany?.id}

@@ -193,6 +193,10 @@ input:focus, textarea:focus {
 }
 .btn.secondary:hover { background: #f0f1f4; }
 
+.btn.danger { background: var(--danger); color: #fff; }
+.btn.danger:hover { background: #a3271d; }
+.btn.danger:disabled { opacity: 0.6; cursor: default; }
+
 .btn.link {
   background: none;
   border: none;
@@ -279,16 +283,35 @@ table.lignes-editor select:hover { border-color: var(--border); }
 .modal .section-title { margin: 0; }
 .modal .actions { margin-top: 4px; }
 
+.invoices-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .invoices-search {
   width: 100%;
   max-width: 320px;
-  margin-bottom: 16px;
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
   color: var(--text);
+}
+
+.invoices-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.invoices-filters label {
+  min-width: 130px;
 }
 
 table.invoices-table {
@@ -337,6 +360,8 @@ table.invoices-table td.num { text-align: right; }
 
 .card .section-title { margin-top: 0; }
 
+.backup-card .payments-folder-hint { margin-top: 4px; margin-bottom: 12px; max-width: 640px; }
+
 .dashboard-card-header {
   display: flex;
   align-items: center;
@@ -376,6 +401,13 @@ table.invoices-table td.num { text-align: right; }
   font-size: 20px;
   font-weight: 700;
   color: var(--text);
+}
+
+.stat-subvalue {
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .stat-delta {
@@ -534,6 +566,83 @@ table.invoices-table td.num { text-align: right; }
 .badge-payee { background: #e2efda; color: #1a7f37; }
 .badge-probable { background: #fff2cc; color: #8a6d00; }
 .badge-nonpayee { background: #fce4e4; color: var(--danger); }
+
+.aging-low { background: #e2efda; color: #1a7f37; }
+.aging-medium { background: #fff2cc; color: #8a6d00; }
+.aging-high { background: #fde3cf; color: #b3541e; }
+.aging-severe { background: #fce4e4; color: var(--danger); }
+.aging-severe-text { color: var(--danger); }
+
+.subtabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.subtab-btn.active {
+  color: var(--text);
+  border-bottom-color: var(--accent, #2563eb);
+}
+
+.payments-detail-row td {
+  background: var(--surface-alt, #f7f7f9);
+  padding: 12px 16px;
+}
+
+.payments-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px 20px;
+  font-size: 12.5px;
+}
+
+.payments-detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.payments-detail-wide {
+  grid-column: 1 / -1;
+}
+
+.payments-detail-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.payments-tx-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.payments-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
 
 .table-scroll { overflow-x: auto; }
 .table-scroll table.invoices-table { min-width: 900px; }

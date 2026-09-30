@@ -23,7 +23,8 @@ const {
   deleteInvoice,
 } = require("./invoices");
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
-const { initPayments, releveDirFor, scanPayments, verifyPayment } = require("./payments");
+const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile } = require("./payments");
+const { initBackup, exportBackup, importBackup } = require("./backup");
 
 const isDev = !app.isPackaged;
 
@@ -79,6 +80,7 @@ app.whenReady().then(() => {
   initArticles(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), app.getPath("documents"));
+  initBackup(app.getPath("userData"), app.getPath("documents"));
   createWindow();
 
   app.on("activate", () => {
@@ -161,10 +163,56 @@ function invoiceFilePath(company, numero) {
   return path.join(invoicesDirFor(company), `facture-${sanitizeForPath(numero || "brouillon")}.pdf`);
 }
 
+// Largeur de la zone imprimable en px CSS (A4 210mm - marges gauche/droite
+// 12mm+12mm = 186mm, a 96px/pouce). On donne cette largeur a la fenetre hors
+// ecran pour que la mise en page mesurée avant impression corresponde a celle
+// de la page finale (memes retours a la ligne dans les designations).
+const LARGEUR_ZONE_IMPRIMABLE_PX = Math.round((210 - 12 - 12) * (96 / 25.4));
+
+// Ajoute des lignes vides en bas du tableau jusqu'a occuper (presque) toute la
+// hauteur imprimable de la page, quel que soit le nombre de lignes reelles de
+// la facture, pour ne pas laisser un grand vide en bas d'une facture courte.
+// S'arrete des qu'ajouter une ligne de plus depasserait la hauteur disponible
+// (avec une marge de securite), donc ne provoque jamais de 2e page.
+async function remplirEspaceRestant(win) {
+  try {
+    await win.webContents.executeJavaScript(`
+      (function () {
+        var MM_EN_PX = 96 / 25.4;
+        var hauteurImprimablePx = (297 - 14 - 14) * MM_EN_PX; // A4 - marges haut/bas
+        var margeSecuritePx = 12;
+        var tbody = document.querySelector("table.lignes tbody");
+        if (!tbody) return { ajoutees: 0 };
+        var ligneVideHtml =
+          '<tr><td class="num">&nbsp;</td><td class="designation">&nbsp;</td>' +
+          '<td class="num">&nbsp;</td><td class="num">&nbsp;</td></tr>';
+        var ajoutees = 0;
+        for (var i = 0; i < 60; i++) {
+          tbody.insertAdjacentHTML("beforeend", ligneVideHtml);
+          if (document.body.scrollHeight > hauteurImprimablePx - margeSecuritePx) {
+            tbody.removeChild(tbody.lastElementChild);
+            break;
+          }
+          ajoutees++;
+        }
+        return { ajoutees: ajoutees };
+      })();
+    `);
+  } catch {
+    // Au pire, la facture garde son remplissage par defaut (voir invoiceTemplate.js)
+  }
+}
+
 async function writePdfToFile(html, filePath) {
-  const pdfWindow = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+  const pdfWindow = new BrowserWindow({
+    show: false,
+    width: LARGEUR_ZONE_IMPRIMABLE_PX,
+    height: 1200,
+    webPreferences: { offscreen: true },
+  });
   try {
     await pdfWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    await remplirEspaceRestant(pdfWindow);
     const pdfBuffer = await pdfWindow.webContents.printToPDF({
       printBackground: true,
       pageSize: "A4",
@@ -301,9 +349,84 @@ ipcMain.handle("payments:verify", (_event, { invoiceId, operationKey, confirmer 
 
 ipcMain.handle("payments:getFolderPath", () => releveDirFor(getActiveCompany()));
 
+// Import d'un fichier d'activite BIATNET (CSV) : une fois qu'une entreprise
+// a importe au moins un fichier, scanPayments() n'utilise plus que cette
+// source pour elle (voir payments.js) — plus besoin de deposer de releves
+// dans son dossier.
+ipcMain.handle("payments:importActivity", async () => {
+  const company = getActiveCompany();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Importer un relevé d'activité BIATNET (CSV)",
+    filters: [{ name: "Fichier CSV", extensions: ["csv"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const resume = importActivityFile(company.id, result.filePaths[0]);
+    return { ok: true, ...resume };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
 ipcMain.handle("payments:openFolder", async () => {
   const dir = releveDirFor(getActiveCompany());
   const result = await shell.openPath(dir);
   if (result) return { opened: false, error: result };
   return { opened: true };
+});
+
+// --------------------------------------------------------------------------
+// IPC : sauvegarde et restauration complete (toutes entreprises)
+// --------------------------------------------------------------------------
+
+ipcMain.handle("backup:export", async () => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Exporter une sauvegarde",
+    defaultPath: `facturation-sauvegarde-${new Date().toISOString().slice(0, 10)}.zip`,
+    filters: [{ name: "Archive ZIP", extensions: ["zip"] }],
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  try {
+    const resume = exportBackup(result.filePath);
+    return { ok: true, ...resume };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+// Restaurer ecrase toutes les donnees actuelles (toutes entreprises) par
+// celles de l'archive : confirmation native bloquante avant de proceder, une
+// copie de securite des fichiers actuels est prise avant ecrasement, puis
+// l'application redemarre completement pour relire tout son etat depuis les
+// fichiers restaures (listes en memoire, overrides de paiement, etc.).
+ipcMain.handle("backup:import", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Restaurer une sauvegarde",
+    filters: [{ name: "Archive ZIP", extensions: ["zip"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+
+  const confirm = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    buttons: ["Annuler", "Restaurer et redemarrer"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Restaurer une sauvegarde",
+    message:
+      "Cette operation va remplacer toutes les donnees actuelles (entreprises, factures, catalogue, suivi des paiements) par celles de la sauvegarde.",
+    detail:
+      "Les donnees actuelles seront d'abord copiees de cote par securite (dossier \"avant-restauration-...\" dans les données de l'app), au cas ou ce ne serait pas le bon fichier. L'application redemarrera ensuite automatiquement.",
+  });
+  if (confirm.response !== 1) return { ok: false, canceled: true };
+
+  try {
+    const resume = importBackup(result.filePaths[0]);
+    app.relaunch();
+    app.exit(0);
+    return { ok: true, ...resume };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
 });

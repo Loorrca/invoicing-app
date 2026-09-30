@@ -11,10 +11,14 @@ function formatDate(d) {
   return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+const EMPTY_FILTERS = { du: "", au: "", montantMin: "", montantMax: "" };
+
 export default function InvoicesList({ onEdit }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -29,13 +33,29 @@ export default function InvoicesList({ onEdit }) {
     refresh();
   }, []);
 
+  function updateFilter(field, value) {
+    setFilters((f) => ({ ...f, [field]: value }));
+  }
+
+  const activeFilterCount = Object.values(filters).filter((v) => v !== "").length;
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return invoices;
-    return invoices.filter(
-      (f) => (f.numero || "").toLowerCase().includes(q) || (f.client || "").toLowerCase().includes(q)
-    );
-  }, [invoices, query]);
+    const min = filters.montantMin !== "" ? Number(filters.montantMin) : null;
+    const max = filters.montantMax !== "" ? Number(filters.montantMax) : null;
+
+    return invoices.filter((f) => {
+      if (q && !(f.numero || "").toLowerCase().includes(q) && !(f.client || "").toLowerCase().includes(q)) {
+        return false;
+      }
+      if (filters.du && (f.date || "") < filters.du) return false;
+      if (filters.au && (f.date || "") > filters.au) return false;
+      const ttc = f.totaux?.ttc ?? null;
+      if (min !== null && !Number.isNaN(min) && (ttc === null || ttc < min)) return false;
+      if (max !== null && !Number.isNaN(max) && (ttc === null || ttc > max)) return false;
+      return true;
+    });
+  }, [invoices, query, filters]);
 
   async function handleOpenPdf(id) {
     setStatus(null);
@@ -62,13 +82,58 @@ export default function InvoicesList({ onEdit }) {
       <h1>Factures</h1>
       <p className="subtitle">Historique des factures generees pour l'entreprise active.</p>
 
-      <input
-        type="text"
-        className="invoices-search"
-        placeholder="Rechercher par client ou numero..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      <div className="invoices-search-row">
+        <input
+          type="text"
+          className="invoices-search"
+          placeholder="Rechercher par client ou numero..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <button type="button" className="btn secondary" onClick={() => setShowFilters((v) => !v)}>
+          Filtres{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+        </button>
+      </div>
+
+      {showFilters && (
+        <div className="card invoices-filters">
+          <label>
+            Du
+            <input type="date" value={filters.du} onChange={(e) => updateFilter("du", e.target.value)} />
+          </label>
+          <label>
+            Au
+            <input type="date" value={filters.au} onChange={(e) => updateFilter("au", e.target.value)} />
+          </label>
+          <label>
+            Montant min (TTC)
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              placeholder="0.000"
+              value={filters.montantMin}
+              onChange={(e) => updateFilter("montantMin", e.target.value)}
+            />
+          </label>
+          <label>
+            Montant max (TTC)
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              placeholder="—"
+              value={filters.montantMax}
+              onChange={(e) => updateFilter("montantMax", e.target.value)}
+            />
+          </label>
+          {activeFilterCount > 0 && (
+            <button type="button" className="btn link" onClick={() => setFilters(EMPTY_FILTERS)}>
+              Réinitialiser les filtres
+            </button>
+          )}
+        </div>
+      )}
 
       {status && (
         <p className={`status ${status.kind === "ok" ? "ok" : status.kind === "error" ? "error" : ""}`}>
@@ -78,7 +143,9 @@ export default function InvoicesList({ onEdit }) {
 
       {filtered.length === 0 ? (
         <p className="subtitle">
-          {query ? "Aucune facture ne correspond a cette recherche." : "Aucune facture pour le moment."}
+          {query || activeFilterCount > 0
+            ? "Aucune facture ne correspond a cette recherche/ces filtres."
+            : "Aucune facture pour le moment."}
         </p>
       ) : (
         <table className="invoices-table">

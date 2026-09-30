@@ -98,7 +98,7 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   .company { display: flex; gap: 4mm; align-items: flex-start; }
   .company img { max-height: 22mm; max-width: 45mm; object-fit: contain; }
   .company .name { font-size: 15pt; font-weight: 700; margin: 0 0 1mm; }
-  .company .meta { font-size: 9pt; color: #444; line-height: 1.5; margin: 0; }
+  .company .meta { font-size: 9pt; color: #333; font-weight: 500; line-height: 1.5; margin: 0; }
   .invoice-meta { text-align: right; }
   .invoice-meta .title {
     font-size: 16pt; font-weight: 700; letter-spacing: 0.5px;
@@ -109,14 +109,14 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
     display: flex; justify-content: space-between; margin-bottom: 6mm;
   }
   .client-block .box {
-    border: 1px solid #ccc; border-radius: 2mm; padding: 3mm 4mm; min-width: 65mm;
+    border: 1.5px solid #999; border-radius: 2mm; padding: 3mm 4mm; min-width: 65mm;
   }
   .client-block .box .label {
-    font-size: 8.5pt; text-transform: uppercase; color: #777; letter-spacing: 0.5px;
+    font-size: 8.5pt; text-transform: uppercase; color: #555; font-weight: 700; letter-spacing: 0.5px;
     margin: 0 0 1mm;
   }
   .client-block .box .value { font-size: 12pt; font-weight: 600; margin: 0; }
-  .refs { font-size: 9.5pt; color: #555; margin-top: 2mm; }
+  .refs { font-size: 9.5pt; color: #444; font-weight: 500; margin-top: 2mm; }
   table.lignes { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
   table.lignes th {
     background: #1a1a1a; color: #fff; font-size: 9.5pt; text-transform: uppercase;
@@ -124,39 +124,40 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   }
   table.lignes th.num, table.lignes td.num { text-align: right; }
   table.lignes td {
-    padding: 1.6mm 3mm; border-bottom: 1px solid #e5e5e5; font-size: 10.5pt;
+    padding: 1.6mm 3mm; border-bottom: 1px solid #aaa; font-size: 10.5pt;
   }
   .totaux { display: flex; justify-content: flex-end; margin-bottom: 4mm; }
   .totaux table { border-collapse: collapse; min-width: 70mm; }
   .totaux td { padding: 1.5mm 3mm; font-size: 10.5pt; }
-  .totaux td.label { color: #555; }
+  .totaux td.label { color: #444; font-weight: 500; }
   .totaux td.val { text-align: right; font-variant-numeric: tabular-nums; }
   .totaux tr.ttc td { border-top: 1.5px solid #1a1a1a; font-weight: 700; font-size: 12pt; }
   .lettres {
-    border: 1px solid #ccc; border-radius: 2mm; padding: 2.5mm 4mm;
-    font-size: 10pt; font-style: italic; margin-bottom: 6mm;
+    border: 1.5px solid #999; border-radius: 2mm; padding: 2.5mm 4mm;
+    font-size: 10pt; font-weight: 500; font-style: italic; color: #222; margin-bottom: 6mm; margin-right: 3mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .signature-row {
     display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 7mm;
+    margin-right: 3mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .signature-box {
     flex: 1 1 0;
     min-height: 24mm;
-    border: 1px solid #ccc; border-radius: 2mm;
+    border: 1.5px solid #999; border-radius: 2mm;
     padding: 2mm 4mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .signature-label {
-    font-size: 8.5pt; text-transform: uppercase; color: #777; letter-spacing: 0.5px;
+    font-size: 8.5pt; text-transform: uppercase; color: #555; font-weight: 700; letter-spacing: 0.5px;
     margin: 0;
   }
   .signature-content {
-    font-size: 10pt; margin: 2mm 0 0;
+    font-size: 10pt; font-weight: 500; margin: 2mm 0 0;
   }
   .footer {
-    font-size: 8.5pt; color: #888; text-align: center; border-top: 1px solid #e5e5e5; padding-top: 3mm;
+    font-size: 8.5pt; color: #555; font-weight: 500; text-align: center; border-top: 1px solid #aaa; padding-top: 3mm;
     break-inside: avoid; page-break-inside: avoid;
   }
   .bottom-block { break-inside: avoid; page-break-inside: avoid; }

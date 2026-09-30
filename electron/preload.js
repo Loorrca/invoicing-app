@@ -23,4 +23,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("payments:verify", { invoiceId, operationKey, confirmer }),
   getPaymentsFolderPath: () => ipcRenderer.invoke("payments:getFolderPath"),
   openPaymentsFolder: () => ipcRenderer.invoke("payments:openFolder"),
+  importPaymentsActivity: () => ipcRenderer.invoke("payments:importActivity"),
+  exportBackup: () => ipcRenderer.invoke("backup:export"),
+  importBackup: () => ipcRenderer.invoke("backup:import"),
 });

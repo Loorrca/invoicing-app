@@ -10,6 +10,7 @@ const EMPTY = {
   rib: "",
   logo_data_url: "",
   qr_data_url: "",
+  invoice_template: "classic",
 };
 
 // Redimensionne l'image choisie (hauteur max 300px) avant de la stocker, pour
@@ -163,39 +164,41 @@ export default function Settings({ activeCompany, onSaved }) {
           </div>
         </div>
 
-        <div className="form-row logo-row">
-          <div className="qr-preview" onClick={() => qrInputRef.current?.click()}>
-            {values.qr_data_url ? (
-              <img src={values.qr_data_url} alt="QR code" />
-            ) : (
-              <span>Ajouter un QR code</span>
-            )}
-          </div>
-          <div>
-            <p className="field-hint" style={{ marginTop: 0 }}>
-              QR code du site web / de la boutique en ligne, imprime sous le tableau de la facture.
-            </p>
-            <button type="button" className="btn secondary" onClick={() => qrInputRef.current?.click()}>
-              Choisir une image
-            </button>
-            {values.qr_data_url && (
-              <button
-                type="button"
-                className="btn link"
-                onClick={() => update("qr_data_url", "")}
-              >
-                Retirer le QR code
+        {values.invoice_template !== "lignes" && (
+          <div className="form-row logo-row">
+            <div className="qr-preview" onClick={() => qrInputRef.current?.click()}>
+              {values.qr_data_url ? (
+                <img src={values.qr_data_url} alt="QR code" />
+              ) : (
+                <span>Ajouter un QR code</span>
+              )}
+            </div>
+            <div>
+              <p className="field-hint" style={{ marginTop: 0 }}>
+                QR code du site web / de la boutique en ligne, imprime sous le tableau de la facture.
+              </p>
+              <button type="button" className="btn secondary" onClick={() => qrInputRef.current?.click()}>
+                Choisir une image
               </button>
-            )}
-            <input
-              ref={qrInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleQrChange}
-            />
+              {values.qr_data_url && (
+                <button
+                  type="button"
+                  className="btn link"
+                  onClick={() => update("qr_data_url", "")}
+                >
+                  Retirer le QR code
+                </button>
+              )}
+              <input
+                ref={qrInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={handleQrChange}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="grid-2">
           <label>

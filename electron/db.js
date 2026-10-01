@@ -18,6 +18,9 @@ const COMPANY_DEFAULTS = {
   rib: "",
   logo_data_url: "",
   qr_data_url: "",
+  // Gabarit de facture ("classic" ou "lignes" — voir invoiceTemplate.js) :
+  // "classic" par defaut pour toute nouvelle entreprise.
+  invoice_template: "classic",
 };
 
 let filePath = null;
@@ -26,6 +29,23 @@ let store = null; // { companies: [...], active_company_id: string }
 
 function newCompany(fields = {}) {
   return { id: crypto.randomUUID(), ...COMPANY_DEFAULTS, ...fields };
+}
+
+// Migration ponctuelle (demande explicite de l'utilisateur) : MASTERFLAG
+// doit avoir un gabarit de facture different de TEXBANNER, sans que ce
+// dernier ne change. Les entreprises deja enregistrees n'ont pas encore le
+// champ `invoice_template` (ajoute apres coup) ; on l'assigne une seule
+// fois ici, par nom (insensible a la casse/espaces), sans toucher aux
+// entreprises deja migrees ni a celles qui ne s'appellent pas MASTERFLAG
+// (qui restent "classic" par defaut, via l'affichage cote invoiceTemplate.js).
+function migrateInvoiceTemplates(companies) {
+  return companies.map((c) => {
+    if (c.invoice_template) return c;
+    if ((c.company_name || "").trim().toUpperCase() === "MASTERFLAG") {
+      return { ...c, invoice_template: "lignes" };
+    }
+    return c;
+  });
 }
 
 function load() {
@@ -67,7 +87,7 @@ function load() {
 
   const activeExists = raw.companies.some((c) => c.id === raw.active_company_id);
   return {
-    companies: raw.companies,
+    companies: migrateInvoiceTemplates(raw.companies),
     active_company_id: activeExists ? raw.active_company_id : raw.companies[0].id,
   };
 }

@@ -54,7 +54,13 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
  * Produit le HTML imprimable d'une facture (letterhead + tableau + totaux
  * + montant en toutes lettres), pret a etre transforme en PDF.
  *
- * @param {object} company  { company_name, address, rne, tax_id, phone, email, rib, logo_data_url, qr_data_url }
+ * @param {object} company  { company_name, address, rne, tax_id, phone, email, rib, logo_data_url, qr_data_url, invoice_template }
+ *   `invoice_template` : "classic" (par defaut) ou "lignes" — deux gabarits
+ *   visuels au choix par entreprise (meme position de logo/en-tete, memes
+ *   donnees, seule la mise en forme du tableau/des totaux/des encadres
+ *   change ; aucune couleur n'intervient dans la difference, tout reste
+ *   imprimable a l'encre noire). Le QR code (§ ci-dessous) n'est affiche
+ *   que sur le gabarit "classic".
  * @param {object} invoice  { numero, date, client, bonCommande, bonLivraison, lignes, avecFodec, avecTimbre, timbre }
  *   `client` est soit une chaine (anciennes factures), soit un instantane
  *   { id, nom, code, adresse } venant du catalogue clients.
@@ -72,6 +78,14 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
  *     gabarit HTML/CSS, donc meme position garantie).
  */
 function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
+  // Deux gabarits au choix par entreprise (voir le commentaire JSDoc
+  // ci-dessus) : "lignes" reste le seul autre cas reconnu, toute autre
+  // valeur (y compris absente) retombe sur "classic" par securite.
+  const variant = company.invoice_template === "lignes" ? "lignes" : "classic";
+  // Le QR code (site web/boutique) n'a de sens que pour l'entreprise qui
+  // l'utilise (TEXBANNER, gabarit "classic") — jamais affiche sur "lignes",
+  // meme si un QR a ete enregistre par erreur sur ce profil.
+  const showQr = variant === "classic" && !!company.qr_data_url;
   const lignes = invoice.lignes || [];
   const avecFodec = invoice.avecFodec !== false;
   const avecTimbre = !!invoice.avecTimbre;
@@ -111,6 +125,43 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
   const nom = nomClient(invoice.client);
   const code = codeClient(invoice.client);
   const adresse = adresseClient(invoice.client);
+
+  // Recapitulatif des totaux : inchange sur "classic" (bloc vertical, QR a
+  // gauche quand il y en a un). Sur "lignes", P.T.H.T/FODEC/T.V.A/Timbre
+  // passent sur une bande horizontale (espace libere par l'absence de QR
+  // sur ce gabarit, voir CSS ci-dessus), TOTAL T.T.C/NET A PAYER restant
+  // dans un encadre final aligne a droite.
+  const totauxHtml = variant === "lignes"
+    ? `<div class="totaux-lignes">
+    <div class="totaux-strip">
+      <div class="totaux-item"><span class="ti-label">P.T.H.T</span><span class="ti-val">${formatMontant(ht)}</span></div>
+      ${avecFodec ? `<div class="totaux-item"><span class="ti-label">FODEC 1%</span><span class="ti-val">${formatMontant(fodec)}</span></div>` : ""}
+      <div class="totaux-item"><span class="ti-label">T.V.A 19%</span><span class="ti-val">${formatMontant(tva)}</span></div>
+      ${timbre > 0 ? `<div class="totaux-item"><span class="ti-label">Timbre fiscal</span><span class="ti-val">${formatMontant(timbre)}</span></div>` : ""}
+    </div>
+    <table class="totaux-final">
+      <tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>
+      ${timbre > 0 ? `<tr class="net"><td class="label">NET A PAYER</td><td class="val">${formatMontant(totalGeneral)}</td></tr>` : ""}
+    </table>
+  </div>`
+    : `<div class="totaux${showQr ? " with-qr" : ""}">
+    ${showQr ? `
+    <div class="totaux-qr">
+      <img src="${company.qr_data_url}" alt="QR code" />
+      <span class="totaux-qr-label">Boutique en ligne</span>
+    </div>` : ""}
+    <table>
+      <tr><td class="label">P.T.H.T</td><td class="val">${formatMontant(ht)}</td></tr>
+      ${avecFodec ? `<tr><td class="label">FODEC 1%</td><td class="val">${formatMontant(fodec)}</td></tr>` : ""}
+      <tr><td class="label">T.V.A 19%</td><td class="val">${formatMontant(tva)}</td></tr>
+      ${timbre > 0
+        ? `<tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>
+      <tr><td class="label">Timbre fiscal</td><td class="val">${formatMontant(timbre)}</td></tr>
+      <tr class="net"><td class="label">NET A PAYER</td><td class="val">${formatMontant(totalGeneral)}</td></tr>`
+        : `<tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>`
+      }
+    </table>
+  </div>`;
 
   return `<!doctype html>
 <html lang="fr">
@@ -221,6 +272,100 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
   }
   .bottom-block { break-inside: avoid; page-break-inside: avoid; }
   table.lignes tr { break-inside: avoid; page-break-inside: avoid; }
+  /* Gabarit "lignes" (deuxieme entreprise) : meme en-tete/logo, memes
+     donnees, mais une presentation en grille/lignes pleines plutot que les
+     aplats du gabarit "classic" — coins carres au lieu d'arrondis, tableau
+     entierement quadrille (bordures verticales en plus des horizontales),
+     en-tete du tableau a double filet au lieu d'un fond noir plein, une
+     police differente (serif, plus "officielle") pour accentuer encore la
+     distinction avec le gabarit "classic", et un recapitulatif des totaux
+     en deux temps : P.T.H.T/FODEC/T.V.A/Timbre sur une bande horizontale
+     (pour utiliser l'espace laisse libre par l'absence de QR code sur ce
+     gabarit) puis TOTAL T.T.C/NET A PAYER dans un encadre en dessous.
+     Aucune couleur n'intervient : uniquement du noir sur blanc, a l'encre
+     noire. Les regles qui suivent ne s'appliquent que lorsque la classe
+     variant-lignes est posee sur la balise body (gabarit "lignes" uniquement). */
+  body.variant-lignes {
+    font-family: Georgia, "Times New Roman", Times, serif;
+    /* Marge de securite supplementaire a droite : ce gabarit utilise toute
+       la largeur imprimable (tableau quadrille, bande de totaux) jusqu'au
+       bord, contrairement au gabarit "classic" ou le bloc de totaux reste
+       plus en retrait. Decale tous les encadres/tableaux vers la gauche
+       pour eviter qu'ils ne soient rognes par la zone non imprimable du
+       cote droit de l'imprimante (signale sur MASTERFLAG uniquement). */
+    padding-right: 6mm;
+  }
+  .variant-lignes .client-block .box,
+  .variant-lignes .lettres,
+  .variant-lignes .signature-box {
+    border-radius: 0;
+  }
+  .variant-lignes table.lignes {
+    border-top: 1px solid #1a1a1a;
+    border-left: 1px solid #1a1a1a;
+  }
+  .variant-lignes table.lignes th {
+    background: transparent;
+    color: #1a1a1a;
+    border-bottom: 2px solid #1a1a1a;
+    border-right: 1px solid #1a1a1a;
+  }
+  .variant-lignes table.lignes td {
+    border-right: 1px solid #1a1a1a;
+    border-bottom: 1px solid #1a1a1a;
+  }
+  /* Bande horizontale P.T.H.T / FODEC / T.V.A / Timbre : utilise la largeur
+     disponible sous le tableau au lieu d'empiler ces lignes verticalement. */
+  .variant-lignes .totaux-strip {
+    display: flex;
+    gap: 3mm;
+    margin-bottom: 3mm;
+  }
+  .variant-lignes .totaux-item {
+    flex: 1 1 0;
+    border: 1px solid #1a1a1a;
+    padding: 2mm 3mm;
+    text-align: center;
+  }
+  .variant-lignes .totaux-item .ti-label {
+    display: block;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    color: #444;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    margin-bottom: 1mm;
+  }
+  .variant-lignes .totaux-item .ti-val {
+    display: block;
+    font-size: 11pt;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Encadre final (TOTAL T.T.C / NET A PAYER), aligne a droite comme sur le
+     gabarit "classic", sous la bande horizontale. */
+  .variant-lignes table.totaux-final {
+    margin-left: auto;
+    border-collapse: collapse;
+    min-width: 70mm;
+    border: 1px solid #1a1a1a;
+  }
+  .variant-lignes table.totaux-final td {
+    padding: 1.8mm 3mm;
+    font-size: 10.5pt;
+  }
+  .variant-lignes table.totaux-final td.label { color: #444; font-weight: 500; }
+  .variant-lignes table.totaux-final td.val { text-align: right; font-variant-numeric: tabular-nums; }
+  .variant-lignes table.totaux-final tr.ttc td {
+    border-top: 1.5px solid #1a1a1a;
+    font-weight: 700;
+    font-size: 12pt;
+  }
+  .variant-lignes table.totaux-final tr.net td {
+    border-top: 3px double #1a1a1a;
+    font-weight: 700;
+    font-size: 12pt;
+  }
   /* Gabarit "logo seul" (papier a en-tete a preimprimer) : on masque tout
      le reste de la page (visibility:hidden est herite par tous les
      descendants) et on ne redonne la visibilite qu'au logo, qui garde ainsi
@@ -228,7 +373,7 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
   ${options.onlyLogo ? "body.only-logo { visibility: hidden; } body.only-logo .company img { visibility: visible; }" : ""}
 </style>
 </head>
-<body${options.onlyLogo ? ' class="only-logo"' : ""}>
+<body class="${[options.onlyLogo ? "only-logo" : "", variant === "lignes" ? "variant-lignes" : ""].filter(Boolean).join(" ")}">
   <div class="letterhead">
     <div class="company">
       ${company.logo_data_url
@@ -283,24 +428,7 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
     </tbody>
   </table>
 
-  <div class="totaux${company.qr_data_url ? " with-qr" : ""}">
-    ${company.qr_data_url ? `
-    <div class="totaux-qr">
-      <img src="${company.qr_data_url}" alt="QR code" />
-      <span class="totaux-qr-label">Boutique en ligne</span>
-    </div>` : ""}
-    <table>
-      <tr><td class="label">P.T.H.T</td><td class="val">${formatMontant(ht)}</td></tr>
-      ${avecFodec ? `<tr><td class="label">FODEC 1%</td><td class="val">${formatMontant(fodec)}</td></tr>` : ""}
-      <tr><td class="label">T.V.A 19%</td><td class="val">${formatMontant(tva)}</td></tr>
-      ${timbre > 0
-        ? `<tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>
-      <tr><td class="label">Timbre fiscal</td><td class="val">${formatMontant(timbre)}</td></tr>
-      <tr class="net"><td class="label">NET A PAYER</td><td class="val">${formatMontant(totalGeneral)}</td></tr>`
-        : `<tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>`
-      }
-    </table>
-  </div>
+  ${totauxHtml}
 
   <div class="bottom-block">
     <div class="lettres">

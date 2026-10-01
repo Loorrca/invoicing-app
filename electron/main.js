@@ -537,6 +537,11 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   // DOM compte pour que le nom/l'adresse ne glissent pas a gauche. Le QR,
   // lui, doit au contraire rester bien visible a l'impression (il n'est pas
   // deja present sur le papier a en-tete preimprime, contrairement au logo).
+  // Le gabarit (`invoice_template`) suit la meme logique que le logo/QR : une
+  // ancienne facture (snapshot enregistre avant l'ajout de ce champ) retombe
+  // sur le gabarit actuel de l'entreprise plutot que de rester figee sur
+  // "classic" par defaut — c'est un choix de presentation, pas une donnee
+  // metier a geler comme le nom/l'adresse/le RIB.
   const companyActuelle = getCompanyById(record.companyId);
   const logoActuel = companyActuelle?.logo_data_url || "";
   const qrActuel = companyActuelle?.qr_data_url || "";
@@ -544,6 +549,7 @@ ipcMain.handle("invoice:print", async (_event, id) => {
     ...(record.company || {}),
     logo_data_url: record.company?.logo_data_url || logoActuel,
     qr_data_url: record.company?.qr_data_url || qrActuel,
+    invoice_template: record.company?.invoice_template || companyActuelle?.invoice_template || "classic",
   };
   const html = renderInvoiceHtml(company, record, { hideLogo: true });
 

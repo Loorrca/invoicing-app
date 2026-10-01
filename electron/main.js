@@ -8,11 +8,13 @@ const {
   initDb,
   listCompanies,
   getActiveCompany,
+  getCompanyById,
   setActiveCompany,
   saveActiveCompany,
   addCompany,
 } = require("./db");
-const { initArticles, listArticles, addArticle } = require("./articles");
+const { initArticles, listArticles, addArticle, updateArticle, deleteArticle } = require("./articles");
+const { initClients, listClients, addClient, updateClient, deleteClient } = require("./lib/clients");
 const {
   initInvoices,
   listInvoices,
@@ -23,10 +25,25 @@ const {
   deleteInvoice,
 } = require("./invoices");
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
-const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile } = require("./payments");
-const { initBackup, exportBackup, importBackup } = require("./backup");
+const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch } = require("./payments");
+const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require("./backup");
+
+// Optionnel : si le module n'est pas installe (npm install manquant), on se
+// contente de ne pas numeroter les pages plutot que de planter l'appli.
+let PDFLib = null;
+try {
+  PDFLib = require("pdf-lib");
+} catch {
+  // voir ajouterNumerosDePage ci-dessous
+}
 
 const isDev = !app.isPackaged;
+
+// Force la locale de Chromium en francais : c'est ce qui controle le format
+// (jj/mm/aaaa) et la langue du selecteur natif <input type="date"> (le seul
+// attribut HTML "lang" sur l'input ne suffit pas, Chromium se base sur la
+// locale de l'appli). Doit etre fait avant app.whenReady().
+app.commandLine.appendSwitch("lang", "fr");
 
 let mainWindow = null;
 
@@ -158,6 +175,7 @@ app.whenReady().then(() => {
   registerAppProtocol();
   initDb(app.getPath("userData"));
   initArticles(app.getPath("userData"));
+  initClients(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), app.getPath("documents"));
   initBackup(app.getPath("userData"), app.getPath("documents"));
@@ -194,6 +212,22 @@ ipcMain.handle("companies:add", (_event, fields) => addCompany(fields));
 ipcMain.handle("articles:list", () => listArticles());
 
 ipcMain.handle("articles:add", (_event, fields) => addArticle(fields));
+
+ipcMain.handle("articles:update", (_event, { id, fields }) => updateArticle(id, fields));
+
+ipcMain.handle("articles:delete", (_event, id) => deleteArticle(id));
+
+// --------------------------------------------------------------------------
+// IPC : catalogue de clients
+// --------------------------------------------------------------------------
+
+ipcMain.handle("clients:list", () => listClients());
+
+ipcMain.handle("clients:add", (_event, fields) => addClient(fields));
+
+ipcMain.handle("clients:update", (_event, { id, fields }) => updateClient(id, fields));
+
+ipcMain.handle("clients:delete", (_event, id) => deleteClient(id));
 
 // --------------------------------------------------------------------------
 // IPC : historique des factures
@@ -260,13 +294,34 @@ async function remplirEspaceRestant(win) {
     await win.webContents.executeJavaScript(`
       (function () {
         var MM_EN_PX = 96 / 25.4;
-        var hauteurImprimablePx = (297 - 14 - 14) * MM_EN_PX; // A4 - marges haut/bas
-        var margeSecuritePx = 12;
+        var margeBasVoulueMm = 15; // espace blanc voulu en bas de page, pas plus
+        var hauteurImprimablePx = (297 - 14 - margeBasVoulueMm) * MM_EN_PX; // A4 - marge haut (14mm) - marge bas voulue
+        var margeSecuritePx = 0;
         var tbody = document.querySelector("table.lignes tbody");
         if (!tbody) return { ajoutees: 0 };
+        function estLigneVide(tr) {
+          var desig = tr.querySelector(".designation");
+          return !!desig && desig.textContent.replace(/\\u00a0/g, "").trim() === "";
+        }
+        // Le gabarit ajoute toujours un minimum de lignes vides (voir
+        // invoiceTemplate.js), mais avec le bloc client/references, le
+        // timbre, etc. ce minimum peut a lui seul deja depasser la page :
+        // le bloc du bas (lettres/signature/pied de page), qui ne doit
+        // jamais etre coupe, se retrouve alors rejete en bloc sur une 2e
+        // page en laissant un grand vide sur la 1ere. On retire d'abord
+        // les lignes vides superflues pour faire de la place.
+        while (document.body.scrollHeight > hauteurImprimablePx - margeSecuritePx) {
+          var lignes = tbody.querySelectorAll("tr");
+          var derniereVide = null;
+          for (var k = lignes.length - 1; k >= 0; k--) {
+            if (estLigneVide(lignes[k])) { derniereVide = lignes[k]; break; }
+          }
+          if (!derniereVide) break; // plus de ligne vide a retirer : on laisse deborder sur une 2e page
+          tbody.removeChild(derniereVide);
+        }
         var ligneVideHtml =
-          '<tr><td class="num">&nbsp;</td><td class="designation">&nbsp;</td>' +
-          '<td class="num">&nbsp;</td><td class="num">&nbsp;</td></tr>';
+          '<tr><td class="code">&nbsp;</td><td class="designation">&nbsp;</td>' +
+          '<td class="num">&nbsp;</td><td class="num">&nbsp;</td><td class="num">&nbsp;</td></tr>';
         var ajoutees = 0;
         for (var i = 0; i < 60; i++) {
           tbody.insertAdjacentHTML("beforeend", ligneVideHtml);
@@ -284,6 +339,42 @@ async function remplirEspaceRestant(win) {
   }
 }
 
+// Ajoute "Page X/N" en bas a droite de chaque page, uniquement quand la
+// facture en compte plus d'une (une facture tenant sur une page garde son
+// pied de page tel quel). Chrome ne sait pas numeroter les pages a
+// l'impression (pas de support des marges @page CSS), donc ca se fait apres
+// coup sur le PDF deja genere, une fois qu'on connait le nombre reel de pages.
+async function ajouterNumerosDePage(pdfBuffer) {
+  if (!PDFLib) return pdfBuffer; // pdf-lib pas installe : on garde le PDF tel quel
+  try {
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const pages = pdfDoc.getPages();
+    const total = pages.length;
+    if (total <= 1) return pdfBuffer;
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const taillePolice = 8.5;
+    const margeDroitePt = 34; // ~12mm, aligne avec la marge imprimable de la facture
+    const margeBasPt = 22; // ~7.8mm du bas, dans la marge basse de la facture
+    pages.forEach((page, index) => {
+      const { width } = page.getSize();
+      const texte = `Page ${index + 1}/${total}`;
+      const largeurTexte = font.widthOfTextAtSize(texte, taillePolice);
+      page.drawText(texte, {
+        x: width - largeurTexte - margeDroitePt,
+        y: margeBasPt,
+        size: taillePolice,
+        font,
+        color: rgb(0.33, 0.33, 0.33), // meme gris que le reste du pied de page (#555)
+      });
+    });
+    return Buffer.from(await pdfDoc.save());
+  } catch (e) {
+    console.error("Erreur ajout numeros de page:", e);
+    return pdfBuffer; // au pire, la facture garde son PDF non numerote
+  }
+}
+
 async function writePdfToFile(html, filePath) {
   const pdfWindow = new BrowserWindow({
     show: false,
@@ -294,11 +385,12 @@ async function writePdfToFile(html, filePath) {
   try {
     await pdfWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
     await remplirEspaceRestant(pdfWindow);
-    const pdfBuffer = await pdfWindow.webContents.printToPDF({
+    let pdfBuffer = await pdfWindow.webContents.printToPDF({
       printBackground: true,
       pageSize: "A4",
       margins: { marginType: "none" },
     });
+    pdfBuffer = await ajouterNumerosDePage(pdfBuffer);
     fs.writeFileSync(filePath, pdfBuffer);
   } finally {
     pdfWindow.destroy();
@@ -324,7 +416,7 @@ ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
   const filePath = invoiceFilePath(company, invoice.numero);
   await writePdfToFile(html, filePath);
 
-  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false);
+  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false, !!invoice.avecTimbre, invoice.timbre);
   const record = addInvoice({
     companyId: company.id,
     numero: invoice.numero,
@@ -333,6 +425,8 @@ ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
     bonCommande: invoice.bonCommande,
     bonLivraison: invoice.bonLivraison,
     avecFodec: invoice.avecFodec,
+    avecTimbre: invoice.avecTimbre,
+    timbre: invoice.timbre,
     lignes: invoice.lignes,
     totaux,
     company,
@@ -370,7 +464,7 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
     }
   }
 
-  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false);
+  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false, !!invoice.avecTimbre, invoice.timbre);
   const record = updateInvoice(id, {
     companyId: company.id,
     numero: invoice.numero,
@@ -379,6 +473,8 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
     bonCommande: invoice.bonCommande,
     bonLivraison: invoice.bonLivraison,
     avecFodec: invoice.avecFodec,
+    avecTimbre: invoice.avecTimbre,
+    timbre: invoice.timbre,
     lignes: invoice.lignes,
     totaux,
     company,
@@ -406,6 +502,134 @@ ipcMain.handle("invoice:renderHtml", (_event, invoice) => {
   return renderInvoiceHtml(company, invoice);
 });
 
+// Imprime une facture deja enregistree (depuis l'onglet Factures) : meme
+// mise en page que le PDF, mais avec le logo rendu INVISIBLE (quelle que
+// soit l'entreprise, TEXBANNER ou MASTERFLAG) car on imprime sur du papier a
+// en-tete deja preimprime avec le logo en couleur — un logo pose par-dessus
+// un logo papier ferait doublon, et nos imprimantes sont en noir et blanc de
+// toute facon. Le logo garde sa place (meme image, memes dimensions, juste
+// invisible) plutot que d'etre retire : sinon le nom/l'adresse de
+// l'entreprise glissent tout a gauche pour combler l'espace vide et se
+// retrouvent a chevaucher le logo deja imprime sur le papier.
+// On utilise l'instantane `company` garde sur la facture au moment de son
+// emission (pas le profil actuel), comme pour le reste de l'affichage.
+//
+// Si au moins une imprimante est detectee sur la machine, on ouvre la boite
+// d'impression native du systeme (l'utilisateur choisit l'imprimante/le bac
+// papier et confirme). Sinon, on retombe sur une boite "Enregistrer sous"
+// pour exporter un PDF sans logo a l'emplacement de son choix.
+function printWindowAndWait(win, options) {
+  return new Promise((resolve) => {
+    win.webContents.print(options, (success, failureReason) => {
+      resolve({ success, failureReason });
+    });
+  });
+}
+
+ipcMain.handle("invoice:print", async (_event, id) => {
+  const record = getInvoice(id);
+  if (!record) return { ok: false, error: "Facture introuvable." };
+
+  // L'instantane `company` de la facture ne garde plus le logo ni le QR code
+  // (voir invoices.js) : on retombe ici sur la version actuelle de
+  // l'entreprise de la facture pour les deux. Pour le logo, sans consequence
+  // visuelle puisqu'il reste invisible (hideLogo), seule sa presence dans le
+  // DOM compte pour que le nom/l'adresse ne glissent pas a gauche. Le QR,
+  // lui, doit au contraire rester bien visible a l'impression (il n'est pas
+  // deja present sur le papier a en-tete preimprime, contrairement au logo).
+  const companyActuelle = getCompanyById(record.companyId);
+  const logoActuel = companyActuelle?.logo_data_url || "";
+  const qrActuel = companyActuelle?.qr_data_url || "";
+  const company = {
+    ...(record.company || {}),
+    logo_data_url: record.company?.logo_data_url || logoActuel,
+    qr_data_url: record.company?.qr_data_url || qrActuel,
+  };
+  const html = renderInvoiceHtml(company, record, { hideLogo: true });
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    width: LARGEUR_ZONE_IMPRIMABLE_PX,
+    height: 1200,
+  });
+
+  try {
+    await printWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    await remplirEspaceRestant(printWindow);
+
+    const printers = await printWindow.webContents.getPrintersAsync();
+    if (printers.length > 0) {
+      const { success, failureReason } = await printWindowAndWait(printWindow, {
+        silent: false,
+        printBackground: true,
+        pageSize: "A4",
+        margins: { marginType: "none" },
+      });
+      if (!success) {
+        // L'utilisateur a pu simplement annuler la boite d'impression : ce
+        // n'est pas une erreur a afficher en rouge.
+        if (failureReason === "cancelled" || failureReason === "canceled") {
+          return { ok: false, canceled: true };
+        }
+        return { ok: false, error: failureReason || "Echec de l'impression." };
+      }
+      return { ok: true, printed: true };
+    }
+
+    // Aucune imprimante detectee : on propose d'enregistrer un PDF a la place.
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Aucune imprimante detectee — enregistrer en PDF",
+      defaultPath: `facture-${sanitizeForPath(record.numero || "brouillon")}.pdf`,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+    let pdfBuffer = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: "A4",
+      margins: { marginType: "none" },
+    });
+    pdfBuffer = await ajouterNumerosDePage(pdfBuffer);
+    fs.writeFileSync(result.filePath, pdfBuffer);
+    return { ok: true, saved: true, filePath: result.filePath };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  } finally {
+    printWindow.destroy();
+  }
+});
+
+// Exporte le gabarit du papier a en-tete (onglet Entreprise) : la facture
+// normale, mais avec UNIQUEMENT le logo visible (a la meme place exacte que
+// sur une facture, meme gabarit HTML/CSS) et tout le reste masque. Destine a
+// etre imprime en couleur une fois sur une pile de papier, qui sert ensuite
+// de support aux factures elles-memes (imprimees en noir et blanc, logo
+// masque — voir invoice:print ci-dessus).
+// On recoit le logo directement depuis le formulaire (pas forcement encore
+// enregistre) : le gabarit exporte doit toujours refleter ce qui est affiche
+// a l'ecran au moment du clic, pas la derniere version enregistree.
+ipcMain.handle("company:exportLogoTemplate", async (_event, logoDataUrl) => {
+  if (!logoDataUrl) {
+    return { ok: false, error: "Choisissez d'abord un logo (onglet Entreprise)." };
+  }
+  const company = getActiveCompany();
+  const html = renderInvoiceHtml({ logo_data_url: logoDataUrl }, {}, { onlyLogo: true });
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Exporter le gabarit logo (papier a en-tete)",
+    defaultPath: `gabarit-logo-${sanitizeForPath(company.company_name || "entreprise")}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+  try {
+    await writePdfToFile(html, result.filePath);
+    return { ok: true, filePath: result.filePath };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
 // --------------------------------------------------------------------------
 // IPC : suivi des reglements (rapprochement bancaire BIAT)
 // --------------------------------------------------------------------------
@@ -425,6 +649,16 @@ ipcMain.handle("payments:scan", async () => {
 ipcMain.handle("payments:verify", (_event, { invoiceId, operationKey, confirmer }) => {
   const company = getActiveCompany();
   verifyPayment(company.id, invoiceId, operationKey, confirmer);
+  return true;
+});
+
+// Association manuelle facture <-> transaction (voir payments.js) : permet
+// de lier a la main une facture et une transaction que le rapprochement
+// algorithmique n'a pas proposees (ou s'est trompe), depuis l'onglet
+// Factures ou l'onglet Transactions. `lier=false` retire l'association.
+ipcMain.handle("payments:manualMatch", (_event, { invoiceId, operationKey, lier }) => {
+  const company = getActiveCompany();
+  manualMatch(company.id, invoiceId, operationKey, lier);
   return true;
 });
 
@@ -460,6 +694,8 @@ ipcMain.handle("payments:openFolder", async () => {
 // --------------------------------------------------------------------------
 // IPC : sauvegarde et restauration complete (toutes entreprises)
 // --------------------------------------------------------------------------
+
+ipcMain.handle("backup:getLastInfo", () => getLastBackupInfo());
 
 ipcMain.handle("backup:export", async () => {
   const result = await dialog.showSaveDialog(mainWindow, {

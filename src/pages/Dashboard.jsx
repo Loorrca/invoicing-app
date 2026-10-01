@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { nomClient } from "../utils/clientDisplay.js";
 
 const BAR_COLOR = "#2a78d6";
 const BAR_COLOR_HOVER = "#1c5cab";
@@ -137,6 +138,52 @@ function HorizontalBars({ data, formatValue }) {
   );
 }
 
+// Rappel de sauvegarde (toutes entreprises confondues — voir Sauvegarde.jsx) :
+// un simple export ZIP manuel est facile à oublier, donc un petit rappel
+// visible dès l'ouverture du tableau de bord, qui se colore à mesure que ça
+// date (mêmes seuils que les relances de paiement : ≤14j vert, 15-30j
+// orange, au-delà ou jamais fait rouge).
+function BackupReminderCard({ backupInfo, onExport, exporting, onGoToSauvegarde, backupMsg }) {
+  const lastAt = backupInfo?.lastExportAt || null;
+  const daysSince = lastAt ? Math.floor((Date.now() - new Date(lastAt).getTime()) / 86400000) : null;
+  let cls;
+  let message;
+  if (daysSince === null) {
+    cls = "aging-severe";
+    message = "Aucune sauvegarde n'a encore été faite sur ce poste.";
+  } else if (daysSince <= 14) {
+    cls = "aging-low";
+    message = `Dernière sauvegarde il y a ${daysSince} jour${daysSince > 1 ? "s" : ""}.`;
+  } else if (daysSince <= 30) {
+    cls = "aging-medium";
+    message = `Dernière sauvegarde il y a ${daysSince} jours — ça commence à dater.`;
+  } else {
+    cls = "aging-severe";
+    message = `Dernière sauvegarde il y a ${daysSince} jours — pensez à en refaire une.`;
+  }
+  return (
+    <div className="card backup-reminder-card">
+      <div className="dashboard-card-header">
+        <div className="backup-reminder-info">
+          <span className={`badge ${cls}`}>Sauvegarde</span>
+          <span className="backup-reminder-text">{message}</span>
+        </div>
+        <div className="payments-folder-actions">
+          <button type="button" className="btn primary" onClick={onExport} disabled={exporting}>
+            {exporting ? "Export..." : "Sauvegarder maintenant"}
+          </button>
+          <button type="button" className="btn secondary" onClick={onGoToSauvegarde}>
+            Gérer
+          </button>
+        </div>
+      </div>
+      {backupMsg && (
+        <p className={`status ${backupMsg.kind === "error" ? "error" : "ok"}`}>{backupMsg.text}</p>
+      )}
+    </div>
+  );
+}
+
 function StatTile({ label, value, subValue, delta }) {
   return (
     <div className="stat-tile">
@@ -152,10 +199,13 @@ function StatTile({ label, value, subValue, delta }) {
   );
 }
 
-export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
+export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauvegarde }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [paiements, setPaiements] = useState(null);
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [backupExporting, setBackupExporting] = useState(false);
+  const [backupMsg, setBackupMsg] = useState(null);
 
   useEffect(() => {
     window.api
@@ -169,7 +219,30 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
       .scanPayments()
       .then((res) => setPaiements(res?.ok ? res : null))
       .catch(() => setPaiements(null));
+    window.api
+      .getLastBackupInfo()
+      .then(setBackupInfo)
+      .catch(() => setBackupInfo(null));
   }, []);
+
+  // Sauvegarde complète (toutes entreprises) en un clic depuis le tableau de
+  // bord — même action que l'onglet Sauvegarde (voir Sauvegarde.jsx).
+  async function handleQuickExport() {
+    setBackupExporting(true);
+    setBackupMsg(null);
+    try {
+      const res = await window.api.exportBackup();
+      if (res.canceled) return;
+      if (!res.ok) {
+        setBackupMsg({ kind: "error", text: `Échec de l'export : ${res.error}` });
+        return;
+      }
+      setBackupMsg({ kind: "ok", text: `Sauvegarde créée : ${res.path}` });
+      window.api.getLastBackupInfo().then(setBackupInfo).catch(() => {});
+    } finally {
+      setBackupExporting(false);
+    }
+  }
 
   const stats = useMemo(() => {
     const monthTotals = new Map();
@@ -198,7 +271,7 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
         if (earliestIdx === null || idx < earliestIdx) earliestIdx = idx;
       }
 
-      const client = (f.client || "").trim();
+      const client = nomClient(f.client).trim();
       if (client) clientTotals.set(client, (clientTotals.get(client) || 0) + ht);
 
       for (const l of f.lignes || []) {
@@ -263,6 +336,13 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
       <div className="page">
         <h1>Tableau de bord</h1>
         <p className="subtitle">Aucune facture enregistree pour le moment pour cette entreprise.</p>
+        <BackupReminderCard
+          backupInfo={backupInfo}
+          onExport={handleQuickExport}
+          exporting={backupExporting}
+          onGoToSauvegarde={onGoToSauvegarde}
+          backupMsg={backupMsg}
+        />
       </div>
     );
   }
@@ -379,13 +459,21 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements }) {
               <tr key={f.id}>
                 <td>{f.numero}</td>
                 <td>{fmtDate(f.date)}</td>
-                <td>{f.client}</td>
+                <td>{nomClient(f.client)}</td>
                 <td className="num">{fmtMoney(f.totaux?.ttc)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <BackupReminderCard
+        backupInfo={backupInfo}
+        onExport={handleQuickExport}
+        exporting={backupExporting}
+        onGoToSauvegarde={onGoToSauvegarde}
+        backupMsg={backupMsg}
+      />
     </div>
   );
 }

@@ -54,6 +54,17 @@ export default function Paiements() {
   const [activeTab, setActiveTab] = useState("factures");
   const [expandedId, setExpandedId] = useState(null);
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  // Association manuelle : { type: "invoice", id } pour choisir une
+  // transaction depuis une facture, ou { type: "transaction", id } pour
+  // choisir une facture depuis une transaction (id = operationKey). `id` ici
+  // est toujours invoiceId pour "invoice" et operationKey pour "transaction".
+  const [manualPickerFor, setManualPickerFor] = useState(null);
+  const [manualQuery, setManualQuery] = useState("");
+  const [manualBusyKey, setManualBusyKey] = useState(null);
+  // Garde-fou avant une association manuelle dont le montant s'écarte
+  // beaucoup de la facture (évite un lien posé par erreur de clic) :
+  // { invoiceId, operationKey, ecart } en attente de confirmation explicite.
+  const [manualConfirmTarget, setManualConfirmTarget] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -79,6 +90,47 @@ export default function Paiements() {
 
   async function handleOpenFolder() {
     await window.api.openPaymentsFolder();
+  }
+
+  // Pose ou retire une association manuelle facture <-> transaction. `lier`
+  // a false retire le lien existant de la facture `invoiceId` (operationKey
+  // peut alors etre null, il n'est pas utilise cote backend dans ce cas).
+  async function handleManualMatch(invoiceId, operationKey, lier) {
+    const busyKey = `${invoiceId}::${operationKey || ""}`;
+    setManualBusyKey(busyKey);
+    try {
+      await window.api.manualMatchPayment(invoiceId, operationKey, lier);
+      setManualPickerFor(null);
+      setManualQuery("");
+      setManualConfirmTarget(null);
+      await refresh();
+    } finally {
+      setManualBusyKey(null);
+    }
+  }
+
+  function openManualPicker(type, id) {
+    setManualPickerFor((cur) => (cur && cur.type === type && cur.id === id ? null : { type, id }));
+    setManualQuery("");
+    setManualConfirmTarget(null);
+  }
+
+  // Un montant tres different de la facture est souvent un clic sur la
+  // mauvaise ligne plutot qu'un reglement partiel/groupé volontaire : on
+  // demande alors une confirmation explicite plutot que de poser le lien
+  // tout de suite. Seuil généreux (15 % de la facture, 5 DT minimum) pour ne
+  // jamais gêner les écarts de retenue à la source normaux.
+  function handleChoosePick(invoiceId, operationKey, invoiceTtc, transactionMontant) {
+    const ecart =
+      typeof invoiceTtc === "number" && typeof transactionMontant === "number"
+        ? Math.abs(invoiceTtc - transactionMontant)
+        : null;
+    const seuil = typeof invoiceTtc === "number" ? Math.max(5, 0.15 * invoiceTtc) : null;
+    if (ecart !== null && seuil !== null && ecart > seuil) {
+      setManualConfirmTarget({ invoiceId, operationKey, ecart });
+      return;
+    }
+    handleManualMatch(invoiceId, operationKey, true);
   }
 
   async function handleImportActivity() {
@@ -130,6 +182,30 @@ export default function Paiements() {
   } = data;
 
   const transactionsAffichees = onlyUnassigned ? transactions.filter((t) => !t.affectee) : transactions;
+
+  const manualQueryNorm = manualQuery.trim().toLowerCase();
+
+  // Candidats proposes dans le panneau d'association manuelle, filtres par
+  // la recherche tapee. Depuis une facture : toutes les transactions (une
+  // deja affectee ailleurs reste choisissable, l'association manuelle est
+  // toujours prioritaire et la lui retire). Depuis une transaction : toutes
+  // les factures.
+  const transactionCandidates =
+    manualPickerFor?.type === "invoice"
+      ? transactions.filter((t) => {
+          if (!manualQueryNorm) return true;
+          const hay = `${t.libelle || ""} ${t.reference || ""} ${t.montant || ""}`.toLowerCase();
+          return hay.includes(manualQueryNorm);
+        })
+      : [];
+  const invoiceCandidates =
+    manualPickerFor?.type === "transaction"
+      ? rows.filter((r) => {
+          if (!manualQueryNorm) return true;
+          const hay = `${r.numero || ""} ${r.client || ""}`.toLowerCase();
+          return hay.includes(manualQueryNorm);
+        })
+      : [];
 
   // Factures pas encore confirmees payees, les plus anciennes d'abord — pour
   // savoir lesquelles relancer en priorite.
@@ -304,7 +380,11 @@ export default function Paiements() {
                       </td>
                       <td className="num">{fmtMoney(r.montantRecu)}</td>
                       <td className="payments-retenue" title={r.libelleBancaire || ""}>
-                        {r.confirmeManuellement ? "Confirmé manuellement" : r.retenueAppliquee || "—"}
+                        {r.associationManuelle
+                          ? "Association manuelle"
+                          : r.confirmeManuellement
+                            ? "Confirmé manuellement"
+                            : r.retenueAppliquee || "—"}
                       </td>
                       <td className="invoices-actions">
                         {r.operationKey && (
@@ -336,8 +416,99 @@ export default function Paiements() {
                               Vérifier
                             </button>
                           ))}
+                        {r.peutDissocier ? (
+                          <button
+                            type="button"
+                            className="btn link"
+                            onClick={() => handleManualMatch(r.invoiceId, null, false)}
+                            disabled={manualBusyKey === `${r.invoiceId}::`}
+                          >
+                            Dissocier
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn secondary"
+                            onClick={() => openManualPicker("invoice", r.invoiceId)}
+                          >
+                            {manualPickerFor?.type === "invoice" && manualPickerFor.id === r.invoiceId
+                              ? "Fermer"
+                              : "Associer..."}
+                          </button>
+                        )}
                       </td>
                     </tr>
+                    {manualPickerFor?.type === "invoice" && manualPickerFor.id === r.invoiceId && (
+                      <tr className="payments-detail-row">
+                        <td colSpan={8}>
+                          <div className="manual-match-panel">
+                            <p className="payments-detail-label">
+                              Choisir la transaction qui règle la facture N&deg; {r.numero}
+                            </p>
+                            <input
+                              type="text"
+                              className="manual-match-search"
+                              placeholder="Rechercher par libellé, référence ou montant..."
+                              value={manualQuery}
+                              onChange={(e) => setManualQuery(e.target.value)}
+                              autoFocus
+                            />
+                            {transactionCandidates.length === 0 ? (
+                              <p className="subtitle">Aucune transaction ne correspond.</p>
+                            ) : (
+                              <ul className="manual-match-list">
+                                {transactionCandidates.slice(0, 50).map((t) => (
+                                  <li key={t.operationKey} className="manual-match-item">
+                                    <div className="manual-match-item-info">
+                                      <span>{fmtDate(t.date)}</span>
+                                      <span className="manual-match-item-libelle" title={t.libelle || ""}>
+                                        {t.libelle || "—"}
+                                      </span>
+                                      <span className="num">{fmtMoney(t.montant)}</span>
+                                      {t.affectee && (
+                                        <span className="payments-tag">
+                                          déjà affectée : {t.factures.map((f) => f.numero).join(" + ")}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {manualConfirmTarget?.invoiceId === r.invoiceId &&
+                                    manualConfirmTarget?.operationKey === t.operationKey ? (
+                                      <div className="manual-match-confirm">
+                                        <span>Écart de {fmtMoney(manualConfirmTarget.ecart)} — confirmer ?</span>
+                                        <button
+                                          type="button"
+                                          className="btn primary"
+                                          onClick={() => handleManualMatch(r.invoiceId, t.operationKey, true)}
+                                          disabled={manualBusyKey === `${r.invoiceId}::${t.operationKey}`}
+                                        >
+                                          Confirmer quand même
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn secondary"
+                                          onClick={() => setManualConfirmTarget(null)}
+                                        >
+                                          Annuler
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn secondary"
+                                        onClick={() => handleChoosePick(r.invoiceId, t.operationKey, r.montantTtc, t.montant)}
+                                        disabled={manualBusyKey === `${r.invoiceId}::${t.operationKey}`}
+                                      >
+                                        Choisir
+                                      </button>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {expandedId === r.invoiceId && r.operationKey && (
                       <tr className="payments-detail-row">
                         <td colSpan={8}>
@@ -429,37 +600,130 @@ export default function Paiements() {
                     <th className="num">Montant</th>
                     <th>Affectée à</th>
                     <th>Méthode / confiance</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {transactionsAffichees.map((t) => (
-                    <tr key={t.operationKey}>
-                      <td>{fmtDate(t.date)}</td>
-                      <td className="payments-retenue" title={t.reference || ""}>
-                        {t.reference || "—"}
-                      </td>
-                      <td className="payments-retenue" title={t.libelle || ""}>
-                        {t.libelle || "—"}
-                      </td>
-                      <td className="num">{fmtMoney(t.montant)}</td>
-                      <td>
-                        {t.affectee ? (
-                          <span className={badgeClass("Payée")}>
-                            {t.factures.map((f) => f.numero).join(" + ")}
-                          </span>
-                        ) : (
-                          <span className={badgeClass("Non payée")}>Non affectée</span>
-                        )}
-                        {t.factures.length > 1 && (
-                          <div className="payments-folder-hint">
-                            {t.factures.map((f) => `${f.client} (${fmtMoney(f.montantTtc)})`).join(", ")}
-                          </div>
-                        )}
-                      </td>
-                      <td className="payments-retenue">
-                        {t.affectee ? `${t.methode || "—"} · ${t.confiance || "—"}` : "—"}
-                      </td>
-                    </tr>
+                    <React.Fragment key={t.operationKey}>
+                      <tr>
+                        <td>{fmtDate(t.date)}</td>
+                        <td className="payments-retenue" title={t.reference || ""}>
+                          {t.reference || "—"}
+                        </td>
+                        <td className="payments-retenue" title={t.libelle || ""}>
+                          {t.libelle || "—"}
+                        </td>
+                        <td className="num">{fmtMoney(t.montant)}</td>
+                        <td>
+                          {t.affectee ? (
+                            <span className={badgeClass("Payée")}>
+                              {t.factures.map((f) => f.numero).join(" + ")}
+                            </span>
+                          ) : (
+                            <span className={badgeClass("Non payée")}>Non affectée</span>
+                          )}
+                          {t.factures.length > 1 && (
+                            <div className="payments-folder-hint">
+                              {t.factures.map((f) => `${f.client} (${fmtMoney(f.montantTtc)})`).join(", ")}
+                            </div>
+                          )}
+                        </td>
+                        <td className="payments-retenue">
+                          {t.affectee ? `${t.methode || "—"} · ${t.confiance || "—"}` : "—"}
+                        </td>
+                        <td className="invoices-actions">
+                          {t.associationManuelle ? (
+                            <button
+                              type="button"
+                              className="btn link"
+                              onClick={() => handleManualMatch(t.factures[0].id, null, false)}
+                              disabled={manualBusyKey === `${t.factures[0].id}::`}
+                            >
+                              Dissocier
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => openManualPicker("transaction", t.operationKey)}
+                            >
+                              {manualPickerFor?.type === "transaction" && manualPickerFor.id === t.operationKey
+                                ? "Fermer"
+                                : "Associer..."}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {manualPickerFor?.type === "transaction" && manualPickerFor.id === t.operationKey && (
+                        <tr className="payments-detail-row">
+                          <td colSpan={7}>
+                            <div className="manual-match-panel">
+                              <p className="payments-detail-label">
+                                Choisir la facture réglée par cette transaction ({fmtMoney(t.montant)} le{" "}
+                                {fmtDate(t.date)})
+                              </p>
+                              <input
+                                type="text"
+                                className="manual-match-search"
+                                placeholder="Rechercher par numéro ou client..."
+                                value={manualQuery}
+                                onChange={(e) => setManualQuery(e.target.value)}
+                                autoFocus
+                              />
+                              {invoiceCandidates.length === 0 ? (
+                                <p className="subtitle">Aucune facture ne correspond.</p>
+                              ) : (
+                                <ul className="manual-match-list">
+                                  {invoiceCandidates.slice(0, 50).map((r) => (
+                                    <li key={r.invoiceId} className="manual-match-item">
+                                      <div className="manual-match-item-info">
+                                        <span>N&deg; {r.numero}</span>
+                                        <span className="manual-match-item-libelle" title={r.client || ""}>
+                                          {r.client}
+                                        </span>
+                                        <span className="num">{fmtMoney(r.montantTtc)}</span>
+                                        <span className={badgeClass(r.statut)}>{r.statut}</span>
+                                      </div>
+                                      {manualConfirmTarget?.invoiceId === r.invoiceId &&
+                                      manualConfirmTarget?.operationKey === t.operationKey ? (
+                                        <div className="manual-match-confirm">
+                                          <span>Écart de {fmtMoney(manualConfirmTarget.ecart)} — confirmer ?</span>
+                                          <button
+                                            type="button"
+                                            className="btn primary"
+                                            onClick={() => handleManualMatch(r.invoiceId, t.operationKey, true)}
+                                            disabled={manualBusyKey === `${r.invoiceId}::${t.operationKey}`}
+                                          >
+                                            Confirmer quand même
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn secondary"
+                                            onClick={() => setManualConfirmTarget(null)}
+                                          >
+                                            Annuler
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          className="btn secondary"
+                                          onClick={() => handleChoosePick(r.invoiceId, t.operationKey, r.montantTtc, t.montant)}
+                                          disabled={manualBusyKey === `${r.invoiceId}::${t.operationKey}`}
+                                        >
+                                          Choisir
+                                        </button>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

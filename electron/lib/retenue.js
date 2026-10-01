@@ -14,10 +14,15 @@
  * donc pas chercher un montant exact : on cherche dans une fourchette, en
  * gardant la trace de la variante qui colle.
  *
+ * Certaines recettes des finances appliquent un taux de 1,5 % sur le TTC (au
+ * lieu de 1 %) tout en gardant les 25 % de TVA seule — confirme a l'identique
+ * sur plusieurs paiements reels (ex. factures TEXBANNER 0001 et 0049).
+ *
  * Port fidele de invoice-tracker/invoice_tracker/retenue.py.
  */
 
 const TAUX_RS_TTC = 0.01; // 1 % du TTC
+const TAUX_RS_TTC_MAJORE = 0.015; // variante 1,5 % constatee chez certaines recettes des finances
 const TAUX_RS_TVA = 0.25; // 25 % de la TVA (+ FODEC selon la variante)
 
 // Un reglement peut etre arrondi au dinar superieur *a l'interieur* de la
@@ -41,6 +46,7 @@ function variantes(ttc, tva, fodec) {
   fodec = fodec || 0;
 
   const rsTtc = round3(ttc * TAUX_RS_TTC);
+  const rsTtcMajore = round3(ttc * TAUX_RS_TTC_MAJORE);
   const rsTvaSeule = round3(tva * TAUX_RS_TVA);
   const rsTvaFodec = round3((tva + fodec) * TAUX_RS_TVA);
 
@@ -58,6 +64,11 @@ function variantes(ttc, tva, fodec) {
       montant: ttc - rsTtc - rsTvaFodec,
       code: "RS1_TVAF",
       libelle: "retenue 1 % TTC + 25 % (TVA + FODEC) — calcul complet",
+    },
+    {
+      montant: ttc - rsTtcMajore - rsTvaSeule,
+      code: "RS15_TVA",
+      libelle: "retenue 1,5 % TTC + 25 % TVA (FODEC oublié, taux 1,5 %)",
     },
   ];
 
@@ -103,4 +114,12 @@ function identifier(ttc, tva, fodec, montantRecu, tolerance = 0.5) {
   return { variante: null, ecart: round3(meilleurEcart) };
 }
 
-module.exports = { variantes, fourchette, identifier, TAUX_RS_TTC, TAUX_RS_TVA, MARGE_SUPERIEURE };
+module.exports = {
+  variantes,
+  fourchette,
+  identifier,
+  TAUX_RS_TTC,
+  TAUX_RS_TTC_MAJORE,
+  TAUX_RS_TVA,
+  MARGE_SUPERIEURE,
+};

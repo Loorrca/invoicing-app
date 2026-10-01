@@ -16,6 +16,7 @@ const AdmZip = require("adm-zip");
 
 let userDataDir = null;
 let documentsDir = null;
+let metaFilePath = null;
 
 // Tous les fichiers JSON connus a la racine du dossier de donnees de l'app.
 // Une entree qui n'existe pas encore (ex. activity-imports.json avant le
@@ -25,6 +26,7 @@ const APP_DATA_FILES = [
   "settings.json", // tout premier format, avant le multi-entreprises — repris s'il existe encore
   "invoices.json",
   "articles.json",
+  "clients.json",
   "payments-overrides.json",
   "activity-imports.json",
 ];
@@ -34,10 +36,36 @@ const MANIFEST_VERSION = 1;
 function initBackup(userDataDirArg, documentsDirArg) {
   userDataDir = userDataDirArg;
   documentsDir = documentsDirArg;
+  metaFilePath = path.join(userDataDir, "backup-meta.json");
 }
 
 function facturationDir() {
   return path.join(documentsDir, "Facturation");
+}
+
+// Petit fichier local (jamais inclus dans l'archive elle-meme) qui retient
+// juste la date du dernier export reussi sur ce poste, pour pouvoir rappeler
+// a l'utilisateur de sauvegarder quand ca commence a dater (voir
+// backup:getLastInfo / la carte sur le tableau de bord).
+function loadMeta() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(metaFilePath, "utf-8"));
+    if (raw && typeof raw === "object") return raw;
+  } catch {
+    // pas de fichier, ou fichier invalide : on repart d'un objet vide
+  }
+  return {};
+}
+
+function persistMeta(meta) {
+  const tmp = `${metaFilePath}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2), "utf-8");
+  fs.renameSync(tmp, metaFilePath);
+}
+
+function getLastBackupInfo() {
+  const meta = loadMeta();
+  return { lastExportAt: meta.lastExportAt || null };
 }
 
 /**
@@ -73,6 +101,7 @@ function exportBackup(destPath) {
   zip.addFile("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"));
 
   zip.writeZip(destPath);
+  persistMeta({ ...loadMeta(), lastExportAt: manifest.exportedAt });
   return { path: destPath, nbFichiersApp, nbFichiersDocuments };
 }
 
@@ -146,4 +175,4 @@ function importBackup(zipPath) {
   return { safetyDir, nbFichiersApp, nbFichiersDocuments };
 }
 
-module.exports = { initBackup, exportBackup, importBackup, inspectBackup };
+module.exports = { initBackup, exportBackup, importBackup, inspectBackup, getLastBackupInfo };

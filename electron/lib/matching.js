@@ -22,7 +22,6 @@ const { fourchette, identifier, variantes } = require("./retenue");
 const { correspondance } = require("./translitteration");
 const { dayIndex } = require("./dateUtils");
 
-const JOURS_AVANT = 5;
 const JOURS_APRES = 180;
 const TOLERANCE = 0.5;
 const TAILLE_MAX_LOT = 4;
@@ -100,10 +99,15 @@ function proximite(factures, operation, delaiMax = JOURS_APRES) {
   return Math.max(0, 1 - moyen / Math.max(delaiMax, 1));
 }
 
+// Une operation bancaire ne peut jamais regler une facture pas encore
+// emise : un virement date avant la facture est forcement autre chose
+// (un autre reglement, une avance sans rapport...), jamais ce paiement-la.
+// On n'autorise donc aucune marge vers le passe, seulement vers l'avenir
+// (le reglement arrive apres la facture, jusqu'a delaiMax jours plus tard).
 function datePlausible(facture, operation, delaiMax = JOURS_APRES) {
   if (!facture.dateFacture || !operation.dateOperation) return true;
   const delta = dayIndex(operation.dateOperation) - dayIndex(facture.dateFacture);
-  return delta >= -JOURS_AVANT && delta <= delaiMax;
+  return delta >= 0 && delta <= delaiMax;
 }
 
 function* combinations(arr, k) {

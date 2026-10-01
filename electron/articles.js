@@ -8,7 +8,7 @@ const crypto = require("node:crypto");
 // simple fichier JSON (pas de base de donnees : peu d'articles, pas besoin).
 
 let filePath = null;
-let articles = null; // [{ id, designation, prixUnitaire }]
+let articles = null; // [{ id, designation, prixUnitaire, code }]
 
 function load() {
   try {
@@ -40,23 +40,51 @@ function listArticles() {
 function addArticle(fields = {}) {
   const designation = String(fields.designation || "").trim();
   const prixUnitaire = Number(fields.prixUnitaire) || 0;
+  const code = String(fields.code || "").trim();
   if (!designation) throw new Error("Designation requise");
 
   // Si un article du meme nom existe deja (insensible a la casse), on met a
-  // jour son prix par defaut plutot que de creer un doublon.
+  // jour son prix (et son code) par defaut plutot que de creer un doublon.
   const existing = articles.find(
     (a) => a.designation.toLowerCase() === designation.toLowerCase()
   );
   if (existing) {
     existing.prixUnitaire = prixUnitaire;
+    existing.code = code;
     persist();
     return existing;
   }
 
-  const article = { id: crypto.randomUUID(), designation, prixUnitaire };
+  const article = { id: crypto.randomUUID(), designation, prixUnitaire, code };
   articles.push(article);
   persist();
   return article;
 }
 
-module.exports = { initArticles, listArticles, addArticle };
+// Modifie un article existant (designation, prix et/ou code). Permet de
+// corriger un article saisi autrefois sans code, ou de corriger son nom/prix.
+function updateArticle(id, fields = {}) {
+  const article = articles.find((a) => a.id === id);
+  if (!article) throw new Error("Article introuvable");
+
+  if (fields.designation !== undefined) {
+    const designation = String(fields.designation).trim();
+    if (!designation) throw new Error("Designation requise");
+    article.designation = designation;
+  }
+  if (fields.prixUnitaire !== undefined) {
+    article.prixUnitaire = Number(fields.prixUnitaire) || 0;
+  }
+  if (fields.code !== undefined) {
+    article.code = String(fields.code || "").trim();
+  }
+  persist();
+  return article;
+}
+
+function deleteArticle(id) {
+  articles = articles.filter((a) => a.id !== id);
+  persist();
+}
+
+module.exports = { initArticles, listArticles, addArticle, updateArticle, deleteArticle };

@@ -17,6 +17,7 @@ const COMPANY_DEFAULTS = {
   email: "",
   rib: "",
   logo_data_url: "",
+  qr_data_url: "",
 };
 
 let filePath = null;
@@ -93,6 +94,10 @@ function getActiveCompany() {
   return store.companies.find((c) => c.id === store.active_company_id) || store.companies[0];
 }
 
+function getCompanyById(id) {
+  return store.companies.find((c) => c.id === id) || null;
+}
+
 function setActiveCompany(id) {
   if (store.companies.some((c) => c.id === id)) {
     store.active_company_id = id;
@@ -121,6 +126,7 @@ module.exports = {
   initDb,
   listCompanies,
   getActiveCompany,
+  getCompanyById,
   setActiveCompany,
   saveActiveCompany,
   addCompany,

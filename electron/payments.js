@@ -14,6 +14,7 @@ const {
   dernierImport,
   fusionnerImport,
 } = require("./lib/activityImports");
+const { nomClient } = require("./lib/clientDisplay");
 
 // Suivi des reglements par rapprochement bancaire (port de l'ancien outil
 // Python invoice-tracker). Chaque entreprise a son propre compte BIAT : les
@@ -62,6 +63,10 @@ function initPayments(userDataDir, documentsDirArg) {
   initActivityImports(userDataDir);
 }
 
+function round3(n) {
+  return Math.round(n * 1000) / 1000;
+}
+
 function operationKey(op) {
   return `${op.source}::${op.ligne}`;
 }
@@ -75,6 +80,50 @@ function getOverride(companyId, invoiceId, op) {
 }
 
 // --------------------------------------------------------------------------
+// Association manuelle facture <-> transaction, independante du
+// rapprochement algorithmique : utile quand celui-ci ne propose rien (ou se
+// trompe) et que l'utilisateur sait, lui, quelle transaction paye quelle
+// facture. Reutilise le meme format de cle que les confirmations
+// ("<invoiceId>::<source>::<ligne>"), avec la valeur "manual" pour la
+// distinguer d'une confirmation ("confirmed") — compatible avec les anciens
+// fichiers payments-overrides.json, qui ne contenaient que des "confirmed".
+// Un seul lien manuel par facture : en poser un nouveau remplace l'ancien.
+function manualMatch(companyId, invoiceId, opKeyValue, lier) {
+  if (!overrides[companyId]) overrides[companyId] = {};
+  // On retire d'abord toute autre association manuelle deja posee pour
+  // cette facture (une facture ne peut etre liee manuellement qu'a une
+  // seule transaction a la fois).
+  const prefix = `${invoiceId}::`;
+  for (const key of Object.keys(overrides[companyId])) {
+    if (key.startsWith(prefix) && overrides[companyId][key] === "manual") {
+      delete overrides[companyId][key];
+    }
+  }
+  if (lier) {
+    overrides[companyId][`${invoiceId}::${opKeyValue}`] = "manual";
+  }
+  persistOverrides();
+  return true;
+}
+
+// Toutes les associations manuelles connues pour une entreprise :
+// invoiceId -> operationKey (chaine "source::ligne").
+function manualMatchesFor(companyId) {
+  const out = new Map();
+  const comp = overrides[companyId];
+  if (!comp) return out;
+  for (const [key, value] of Object.entries(comp)) {
+    if (value !== "manual") continue;
+    const sep = key.indexOf("::");
+    if (sep === -1) continue;
+    const invoiceId = key.slice(0, sep);
+    const opKeyValue = key.slice(sep + 2);
+    out.set(invoiceId, opKeyValue);
+  }
+  return out;
+}
+
+// --------------------------------------------------------------------------
 // Adaptation d'une facture de l'app vers le format attendu par matching.js
 // --------------------------------------------------------------------------
 
@@ -84,13 +133,17 @@ function toFacture(invoice) {
     numero: invoice.numero || "",
     numeroInterne: null,
     dateFacture: fromIso(invoice.date),
-    client: invoice.client || "",
+    client: nomClient(invoice.client),
     bonCommande: invoice.bonCommande || "",
     bonLivraison: invoice.bonLivraison || "",
     montantHt: invoice.totaux?.ht ?? null,
     fodec: invoice.totaux?.fodec ?? null,
     tva: invoice.totaux?.tva ?? null,
-    montantTtc: invoice.totaux?.ttc ?? null,
+    // Le timbre fiscal (optionnel) s'ajoute au virement recu sans etre une
+    // taxe : on rapproche donc sur totalGeneral (TTC + timbre) quand il
+    // existe, et on retombe sur TTC pour les anciennes factures qui n'ont
+    // pas ce champ (totalGeneral y est alors absent, pas egal a TTC).
+    montantTtc: invoice.totaux?.totalGeneral ?? invoice.totaux?.ttc ?? null,
   };
 }
 
@@ -160,11 +213,62 @@ async function scanPayments(company, invoices) {
 
   const operations = encaissements(releves);
   const factures = invoices.map(toFacture);
-  const resultat = rapprocher(factures, operations);
+
+  // Associations manuelles (voir manualMatch ci-dessus) : la facture et la
+  // transaction liees a la main sont retirees du pool avant le rapprochement
+  // algorithmique, pour qu'aucune des deux ne soit recapturee ailleurs par
+  // l'algorithme — le lien manuel est toujours prioritaire et exclusif.
+  const operationsByKey = new Map(operations.map((o) => [operationKey(o), o]));
+  const manuelParFacture = new Map(); // invoiceId -> { opKeyValue, operation, facture }
+  for (const [invoiceId, opKeyValue] of manualMatchesFor(company.id)) {
+    const operation = operationsByKey.get(opKeyValue);
+    const facture = factures.find((f) => f.cle === invoiceId);
+    // Lien devenu obsolete (transaction disparue d'un reimport, facture
+    // supprimee...) : on l'ignore silencieusement plutot que de planter.
+    if (!operation || !facture) continue;
+    manuelParFacture.set(invoiceId, { opKeyValue, operation, facture });
+  }
+  const operationsManuellementPrises = new Set([...manuelParFacture.values()].map((m) => m.operation));
+
+  const facturesPourAlgo = factures.filter((f) => !manuelParFacture.has(f.cle));
+  const operationsPourAlgo = operations.filter((o) => !operationsManuellementPrises.has(o));
+
+  const resultat = rapprocher(facturesPourAlgo, operationsPourAlgo);
   const parFacture = resultat.parFacture();
 
   const rows = [];
   for (const invoice of invoices) {
+    const manuel = manuelParFacture.get(invoice.id) || null;
+
+    if (manuel) {
+      const montantTtc = manuel.facture.montantTtc;
+      rows.push({
+        invoiceId: invoice.id,
+        numero: invoice.numero,
+        date: invoice.date,
+        client: nomClient(invoice.client),
+        montantTtc,
+        statut: "Payée",
+        confiance: "Association manuelle",
+        montantRecu: manuel.operation.credit,
+        dateEncaissement: isoOf(manuel.operation.dateOperation),
+        retenueAppliquee: "",
+        ecart: montantTtc !== null ? round3(Math.abs(montantTtc - manuel.operation.credit)) : null,
+        methode: "manuel",
+        libelleBancaire: manuel.operation.libelle,
+        referenceBancaire: manuel.operation.reference,
+        commentaire: "Association manuelle",
+        groupe: false,
+        facturesGroupe: [],
+        confirmeManuellement: false,
+        associationManuelle: true,
+        operationKey: manuel.opKeyValue,
+        peutVerifier: false,
+        peutDissocier: true,
+      });
+      continue;
+    }
+
     const facture = factures.find((f) => f.cle === invoice.id);
     const r = parFacture.get(invoice.id) || null;
 
@@ -188,8 +292,8 @@ async function scanPayments(company, invoices) {
       invoiceId: invoice.id,
       numero: invoice.numero,
       date: invoice.date,
-      client: invoice.client,
-      montantTtc: invoice.totaux?.ttc ?? null,
+      client: nomClient(invoice.client),
+      montantTtc: invoice.totaux?.totalGeneral ?? invoice.totaux?.ttc ?? null,
       statut,
       confiance,
       montantRecu: part,
@@ -208,9 +312,11 @@ async function scanPayments(company, invoices) {
         ? r.factures.map((f) => ({ id: f.cle, numero: f.numero, client: f.client, montantTtc: f.montantTtc }))
         : [],
       confirmeManuellement,
+      associationManuelle: false,
       // Cle stable pour renvoyer une confirmation cote IPC.
       operationKey: r ? operationKey(r.operation) : null,
       peutVerifier: !!r && !confirmeManuellement && (statut === "Probable" || statut === "Partiel ?"),
+      peutDissocier: false,
     });
   }
 
@@ -229,8 +335,35 @@ async function scanPayments(company, invoices) {
   // --------------------------------------------------------------------------
   const rapprochementParOperation = new Map();
   for (const r of resultat.rapprochements) rapprochementParOperation.set(r.operation, r);
+  const manuelParOperation = new Map([...manuelParFacture.values()].map((m) => [m.operation, m]));
 
   const transactions = operations.map((o) => {
+    const manuel = manuelParOperation.get(o);
+    if (manuel) {
+      return {
+        operationKey: operationKey(o),
+        date: isoOf(o.dateOperation),
+        dateValeur: o.dateValeur ? isoOf(o.dateValeur) : null,
+        libelle: o.libelle,
+        reference: o.reference,
+        montant: o.credit,
+        source: o.source,
+        affectee: true,
+        factures: [
+          {
+            id: manuel.facture.cle,
+            numero: manuel.facture.numero,
+            client: manuel.facture.client,
+            montantTtc: manuel.facture.montantTtc,
+          },
+        ],
+        methode: "manuel",
+        confiance: "Association manuelle",
+        ecart: manuel.facture.montantTtc !== null ? round3(Math.abs(manuel.facture.montantTtc - o.credit)) : null,
+        commentaire: "Association manuelle",
+        associationManuelle: true,
+      };
+    }
     const r = rapprochementParOperation.get(o) || null;
     return {
       operationKey: operationKey(o),
@@ -246,6 +379,7 @@ async function scanPayments(company, invoices) {
       confiance: r ? confianceBrute(r) : null,
       ecart: r ? r.ecart : null,
       commentaire: r ? r.commentaire : null,
+      associationManuelle: false,
     };
   });
   transactions.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -311,4 +445,4 @@ function verifyPayment(companyId, invoiceId, opKeyValue, confirmer) {
   return true;
 }
 
-module.exports = { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile };
+module.exports = { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch };

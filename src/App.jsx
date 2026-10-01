@@ -6,11 +6,13 @@ import Productions from "./pages/Productions.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Paiements from "./pages/Paiements.jsx";
 import Sauvegarde from "./pages/Sauvegarde.jsx";
+import Clients from "./pages/Clients.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
   { id: "dashboard", label: "Tableau de bord" },
   { id: "invoice", label: "Nouvelle facture" },
+  { id: "clients", label: "Clients" },
   { id: "invoices", label: "Factures" },
   { id: "productions", label: "Productions" },
   { id: "paiements", label: "Paiements" },
@@ -111,6 +113,7 @@ export default function App() {
             }}
           />
         )}
+        {tab === "clients" && <Clients />}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
         {tab === "paiements" && <Paiements key={activeCompany?.id} />}
         {tab === "sauvegarde" && <Sauvegarde />}
@@ -119,6 +122,7 @@ export default function App() {
             key={activeCompany?.id}
             onGoToInvoices={() => setTab("invoices")}
             onGoToPaiements={() => setTab("paiements")}
+            onGoToSauvegarde={() => setTab("sauvegarde")}
           />
         )}
       </main>

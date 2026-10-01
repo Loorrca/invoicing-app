@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { nomClient, codeClient } from "../utils/clientDisplay.js";
 
 function fmt(n) {
   return Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -21,6 +22,7 @@ export default function InvoicesList({ onEdit }) {
   const [showFilters, setShowFilters] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [printingId, setPrintingId] = useState(null);
 
   async function refresh() {
     setLoading(true);
@@ -45,7 +47,12 @@ export default function InvoicesList({ onEdit }) {
     const max = filters.montantMax !== "" ? Number(filters.montantMax) : null;
 
     return invoices.filter((f) => {
-      if (q && !(f.numero || "").toLowerCase().includes(q) && !(f.client || "").toLowerCase().includes(q)) {
+      if (
+        q &&
+        !(f.numero || "").toLowerCase().includes(q) &&
+        !nomClient(f.client).toLowerCase().includes(q) &&
+        !codeClient(f.client).toLowerCase().includes(q)
+      ) {
         return false;
       }
       if (filters.du && (f.date || "") < filters.du) return false;
@@ -69,6 +76,31 @@ export default function InvoicesList({ onEdit }) {
     }
   }
 
+  // Imprime la facture (boite d'impression native si une imprimante est
+  // detectee, sinon demande ou enregistrer un PDF a la place) — voir
+  // invoice:print dans electron/main.js. Le PDF/l'impression ne comporte
+  // jamais le logo (papier a en-tete deja preimprime).
+  async function handlePrint(id) {
+    setStatus(null);
+    setPrintingId(id);
+    try {
+      const result = await window.api.printInvoice(id);
+      if (!result.ok) {
+        if (!result.canceled) {
+          setStatus({ kind: "error", text: result.error || "Impossible d'imprimer la facture." });
+        }
+      } else if (result.saved) {
+        setStatus({ kind: "ok", text: `PDF enregistre (pas d'imprimante detectee) : ${result.filePath}` });
+      } else if (result.printed) {
+        setStatus({ kind: "ok", text: "Facture envoyee a l'imprimante." });
+      }
+    } catch (err) {
+      setStatus({ kind: "error", text: String(err?.message || err) });
+    } finally {
+      setPrintingId(null);
+    }
+  }
+
   async function handleDelete(id) {
     await window.api.deleteInvoiceRecord(id);
     setConfirmDeleteId(null);
@@ -86,7 +118,7 @@ export default function InvoicesList({ onEdit }) {
         <input
           type="text"
           className="invoices-search"
-          placeholder="Rechercher par client ou numero..."
+          placeholder="Rechercher par client, code client ou numero..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -163,9 +195,17 @@ export default function InvoicesList({ onEdit }) {
               <tr key={f.id}>
                 <td>{f.numero}</td>
                 <td>{formatDate(f.date)}</td>
-                <td>{f.client}</td>
+                <td>{nomClient(f.client)}</td>
                 <td className="num">{fmt(f.totaux?.ttc)} DT</td>
                 <td className="invoices-actions">
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => handlePrint(f.id)}
+                    disabled={printingId === f.id}
+                  >
+                    {printingId === f.id ? "Impression..." : "Imprimer"}
+                  </button>
                   <button type="button" className="btn secondary" onClick={() => handleOpenPdf(f.id)}>
                     Revoir le PDF
                   </button>

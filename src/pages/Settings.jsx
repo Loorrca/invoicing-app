@@ -9,6 +9,7 @@ const EMPTY = {
   email: "",
   rib: "",
   logo_data_url: "",
+  qr_data_url: "",
 };
 
 // Redimensionne l'image choisie (hauteur max 300px) avant de la stocker, pour
@@ -39,7 +40,9 @@ export default function Settings({ activeCompany, onSaved }) {
   const [values, setValues] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null); // { kind: "ok"|"error", text }
+  const [exportingLogo, setExportingLogo] = useState(false);
   const fileInputRef = useRef(null);
+  const qrInputRef = useRef(null);
 
   // Recharge le formulaire a chaque changement d'entreprise active (via le
   // selecteur dans la barre laterale), pas seulement au premier montage.
@@ -59,6 +62,41 @@ export default function Settings({ activeCompany, onSaved }) {
     if (!file) return;
     const dataUrl = await resizeImage(file);
     update("logo_data_url", dataUrl);
+  }
+
+  // Resolution un peu plus elevee que le logo (500px au lieu de 300) : un QR
+  // code trop compresse peut devenir illisible par un scanner, contrairement
+  // a un logo ou la perte de nettete ne se voit presque pas.
+  async function handleQrChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await resizeImage(file, 500);
+    update("qr_data_url", dataUrl);
+  }
+
+  // Exporte un PDF ne contenant que le logo, a la meme place que sur une
+  // facture (en-tete en haut a gauche) et rien d'autre : destine a etre
+  // imprime en couleur sur le papier qui servira ensuite de support aux
+  // factures elles-memes (celles-ci sont imprimees sans logo, voir l'onglet
+  // Factures). Exporte toujours le logo actuellement affiche ci-dessus,
+  // meme si "Enregistrer" n'a pas encore ete clique.
+  async function handleExportLogoTemplate() {
+    setStatus(null);
+    setExportingLogo(true);
+    try {
+      const result = await window.api.exportLogoTemplate(values.logo_data_url);
+      if (!result.ok) {
+        if (!result.canceled) {
+          setStatus({ kind: "error", text: result.error || "Impossible d'exporter le gabarit logo." });
+        }
+      } else {
+        setStatus({ kind: "ok", text: `Gabarit logo enregistre : ${result.filePath}` });
+      }
+    } catch (err) {
+      setStatus({ kind: "error", text: String(err?.message || err) });
+    } finally {
+      setExportingLogo(false);
+    }
   }
 
   async function handleSave(e) {
@@ -97,13 +135,23 @@ export default function Settings({ activeCompany, onSaved }) {
               Choisir une image
             </button>
             {values.logo_data_url && (
-              <button
-                type="button"
-                className="btn link"
-                onClick={() => update("logo_data_url", "")}
-              >
-                Retirer le logo
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn link"
+                  onClick={() => update("logo_data_url", "")}
+                >
+                  Retirer le logo
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={handleExportLogoTemplate}
+                  disabled={exportingLogo}
+                >
+                  {exportingLogo ? "Export..." : "Telecharger le gabarit logo (PDF)"}
+                </button>
+              </>
             )}
             <input
               ref={fileInputRef}
@@ -111,6 +159,40 @@ export default function Settings({ activeCompany, onSaved }) {
               accept="image/*"
               style={{ display: "none" }}
               onChange={handleLogoChange}
+            />
+          </div>
+        </div>
+
+        <div className="form-row logo-row">
+          <div className="qr-preview" onClick={() => qrInputRef.current?.click()}>
+            {values.qr_data_url ? (
+              <img src={values.qr_data_url} alt="QR code" />
+            ) : (
+              <span>Ajouter un QR code</span>
+            )}
+          </div>
+          <div>
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              QR code du site web / de la boutique en ligne, imprime sous le tableau de la facture.
+            </p>
+            <button type="button" className="btn secondary" onClick={() => qrInputRef.current?.click()}>
+              Choisir une image
+            </button>
+            {values.qr_data_url && (
+              <button
+                type="button"
+                className="btn link"
+                onClick={() => update("qr_data_url", "")}
+              >
+                Retirer le QR code
+              </button>
+            )}
+            <input
+              ref={qrInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleQrChange}
             />
           </div>
         </div>

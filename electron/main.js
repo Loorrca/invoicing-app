@@ -174,7 +174,7 @@ function createWindow() {
 app.whenReady().then(() => {
   registerAppProtocol();
   initDb(app.getPath("userData"));
-  initArticles(app.getPath("userData"));
+  initArticles(app.getPath("userData"), listCompanies().map((c) => c.id));
   initClients(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), app.getPath("documents"));
@@ -209,9 +209,9 @@ ipcMain.handle("companies:add", (_event, fields) => addCompany(fields));
 // IPC : catalogue d'articles
 // --------------------------------------------------------------------------
 
-ipcMain.handle("articles:list", () => listArticles());
+ipcMain.handle("articles:list", () => listArticles(getActiveCompany().id));
 
-ipcMain.handle("articles:add", (_event, fields) => addArticle(fields));
+ipcMain.handle("articles:add", (_event, fields) => addArticle(getActiveCompany().id, fields));
 
 ipcMain.handle("articles:update", (_event, { id, fields }) => updateArticle(id, fields));
 

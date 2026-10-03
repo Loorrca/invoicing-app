@@ -221,7 +221,7 @@ export default function Paiements() {
   const totalImpaye = impayees.reduce((s, r) => s + r.resteAEncaisser, 0);
 
   return (
-    <div className="page page-wide">
+    <div className="page page-wide page-xwide">
       <h1>Paiements</h1>
       <p className="subtitle">
         Rapprochement des factures avec les opérations bancaires BIAT de l'entreprise active

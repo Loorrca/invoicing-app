@@ -110,7 +110,7 @@ export default function InvoicesList({ onEdit }) {
   if (loading) return <div className="page">Chargement...</div>;
 
   return (
-    <div className="page">
+    <div className="page page-xwide">
       <h1>Factures</h1>
       <p className="subtitle">Historique des factures generees pour l'entreprise active.</p>
 
@@ -180,62 +180,64 @@ export default function InvoicesList({ onEdit }) {
             : "Aucune facture pour le moment."}
         </p>
       ) : (
-        <table className="invoices-table">
-          <thead>
-            <tr>
-              <th>N&deg;</th>
-              <th>Date</th>
-              <th>Client</th>
-              <th className="num">Total T.T.C</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((f) => (
-              <tr key={f.id}>
-                <td>{f.numero}</td>
-                <td>{formatDate(f.date)}</td>
-                <td>{nomClient(f.client)}</td>
-                <td className="num">{fmt(f.totaux?.ttc)} DT</td>
-                <td className="invoices-actions">
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => handlePrint(f.id)}
-                    disabled={printingId === f.id}
-                  >
-                    {printingId === f.id ? "Impression..." : "Imprimer"}
-                  </button>
-                  <button type="button" className="btn secondary" onClick={() => handleOpenPdf(f.id)}>
-                    Revoir le PDF
-                  </button>
-                  <button type="button" className="btn secondary" onClick={() => onEdit?.(f.id)}>
-                    Modifier
-                  </button>
-                  {confirmDeleteId === f.id ? (
-                    <>
-                      <button type="button" className="btn link" onClick={() => handleDelete(f.id)}>
-                        Confirmer
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => setConfirmDeleteId(null)}>
-                        Annuler
-                      </button>
-                    </>
-                  ) : (
+        <div className="table-scroll">
+          <table className="invoices-table">
+            <thead>
+              <tr>
+                <th>N&deg;</th>
+                <th>Date</th>
+                <th>Client</th>
+                <th className="num">Total T.T.C</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((f) => (
+                <tr key={f.id}>
+                  <td>{f.numero}</td>
+                  <td>{formatDate(f.date)}</td>
+                  <td>{nomClient(f.client)}</td>
+                  <td className="num">{fmt(f.totaux?.ttc)} DT</td>
+                  <td className="invoices-actions">
                     <button
                       type="button"
-                      className="btn icon"
-                      onClick={() => setConfirmDeleteId(f.id)}
-                      aria-label="Supprimer cette facture"
+                      className="btn secondary"
+                      onClick={() => handlePrint(f.id)}
+                      disabled={printingId === f.id}
                     >
-                      &times;
+                      {printingId === f.id ? "Impression..." : "Imprimer"}
                     </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <button type="button" className="btn secondary" onClick={() => handleOpenPdf(f.id)}>
+                      Revoir le PDF
+                    </button>
+                    <button type="button" className="btn secondary" onClick={() => onEdit?.(f.id)}>
+                      Modifier
+                    </button>
+                    {confirmDeleteId === f.id ? (
+                      <>
+                        <button type="button" className="btn link" onClick={() => handleDelete(f.id)}>
+                          Confirmer
+                        </button>
+                        <button type="button" className="btn secondary" onClick={() => setConfirmDeleteId(null)}>
+                          Annuler
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn icon"
+                        onClick={() => setConfirmDeleteId(f.id)}
+                        aria-label="Supprimer cette facture"
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

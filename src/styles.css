@@ -241,7 +241,12 @@ input:focus, textarea:focus {
 
 table.lignes-editor {
   width: 100%;
-  border-collapse: collapse;
+  /* "separate" plutot que "collapse" : meme raison que table.invoices-table
+     plus bas dans ce fichier (bug de repaint Chrome avec border-radius sur un
+     tableau en border-collapse, qui casse les traits horizontaux au clic sur
+     un bouton de la ligne). */
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -371,7 +376,15 @@ table.lignes-editor input.qte-input {
 
 table.invoices-table {
   width: 100%;
-  border-collapse: collapse;
+  /* "separate" + border-spacing:0 plutot que "collapse" : avec
+     border-radius + overflow:hidden sur un <table> en border-collapse, Chrome
+     a un bug de repaint connu — les traits horizontaux (border-bottom) d'une
+     ligne disparaissent/se coupent par endroits dès qu'un element a l'interieur
+     (un bouton au survol/clic, typiquement) force un repaint de sa cellule.
+     "separate" produit le meme rendu ici (aucune bordure verticale, donc rien
+     a fusionner entre cellules) sans déclencher ce bug. */
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -404,6 +417,12 @@ table.invoices-table td.num { text-align: right; }
 }
 
 .page-wide { max-width: 980px; }
+
+/* Pages a tableaux charges en colonnes (Paiements, Factures) : plus larges
+   que .page-wide, sinon leurs tableaux finissent par devoir defiler
+   horizontalement dans .table-scroll meme quand la fenetre a largement la
+   place de tout afficher d'un coup. */
+.page-xwide { max-width: 1400px; }
 
 .card {
   background: var(--panel);
@@ -618,7 +637,14 @@ table.invoices-table td.num { text-align: right; }
   border-radius: 999px;
 }
 
-.badge-payee { background: #e2efda; color: #1a7f37; }
+/* "Payée" en bleu plutot qu'en vert : vert (Payée) et rouge (Non payée)
+   sont difficiles a distinguer pour une partie des gens (daltonisme
+   rouge-vert, le plus courant), alors que jaune (Probable) reste clair pour
+   tout le monde car il ne fait pas partie de cette paire de teintes. Le
+   bleu reprend --accent (deja utilise partout ailleurs dans l'appli) et
+   reste net face au rouge et au jaune, quelle que soit la vision des
+   couleurs. */
+.badge-payee { background: #dde7fb; color: var(--accent-hover); }
 .badge-probable { background: #fff2cc; color: #8a6d00; }
 .badge-nonpayee { background: #fce4e4; color: var(--danger); }
 

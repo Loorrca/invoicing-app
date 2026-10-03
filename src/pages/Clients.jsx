@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { correspondTranslitteration, correspondSigle } from "../utils/translitteration.js";
 
 function emptyDraft() {
   return { nom: "", code: "", adresse: "" };
@@ -32,7 +33,13 @@ export default function Clients() {
     return (
       (c.nom || "").toLowerCase().includes(q) ||
       (c.code || "").toLowerCase().includes(q) ||
-      (c.adresse || "").toLowerCase().includes(q)
+      (c.adresse || "").toLowerCase().includes(q) ||
+      // Recherche translitteree : retrouve "بلدية التضامن" en tapant
+      // "tadhamen"/"tadamen", "المستشفى ... سنان" en tapant "sinan", etc.
+      correspondTranslitteration(c.nom, query) ||
+      // Sigles a points : retrouve "O.N.P.F.T" en tapant "onpft".
+      correspondSigle(c.nom, query) ||
+      correspondSigle(c.code, query)
     );
   });
 

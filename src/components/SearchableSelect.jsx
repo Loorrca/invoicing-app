@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { correspondTranslitteration, correspondSigle } from "../utils/translitteration.js";
 
 // Champ de recherche avec liste filtrée en temps réel (remplace un <select>
 // natif) : on tape une partie du nom/désignation OU du code, la liste des
@@ -45,7 +46,16 @@ export default function SearchableSelect({
     ? items.filter((i) => {
         const label = (getLabel(i) || "").toLowerCase();
         const code = (getCode(i) || "").toLowerCase();
-        return label.includes(q) || code.includes(q);
+        // La recherche translitteree permet de retrouver un client/article en
+        // tapant une transcription latine d'un nom arabe (ou l'inverse) ; la
+        // variante "sigle" retrouve "O.N.P.F.T" en tapant "onpft".
+        return (
+          label.includes(q) ||
+          code.includes(q) ||
+          correspondTranslitteration(getLabel(i), query) ||
+          correspondSigle(getLabel(i), query) ||
+          correspondSigle(code, query)
+        );
       })
     : items;
 

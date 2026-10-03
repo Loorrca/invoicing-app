@@ -55,7 +55,7 @@ export default function Sauvegarde() {
         <h2 className="section-title">Exporter une sauvegarde</h2>
         <p className="payments-folder-hint">
           Crée un fichier .zip contenant toutes les données de l'app et les PDF de factures / relevés déposés
-          dans le dossier Documents/Facturation. Choisissez où l'enregistrer — idéalement pas seulement sur ce
+          dans le dossier Facturation (Bureau sur Windows, Documents sur macOS/Linux). Choisissez où l'enregistrer — idéalement pas seulement sur ce
           poste (clé USB, dossier synchronisé type Google Drive/OneDrive, ou envoyé par email) : si l'ordinateur
           est perdu ou tombe en panne, c'est ce fichier qui permet de tout récupérer.
         </p>

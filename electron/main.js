@@ -177,8 +177,8 @@ app.whenReady().then(() => {
   initArticles(app.getPath("userData"), listCompanies().map((c) => c.id));
   initClients(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
-  initPayments(app.getPath("userData"), app.getPath("documents"));
-  initBackup(app.getPath("userData"), app.getPath("documents"));
+  initPayments(app.getPath("userData"), dossierFacturationBase());
+  initBackup(app.getPath("userData"), dossierFacturationBase());
   buildMenu();
   createWindow();
 
@@ -256,9 +256,11 @@ ipcMain.handle("invoices:delete", (_event, id) => {
 // IPC : generation de facture PDF
 // --------------------------------------------------------------------------
 
-// Les factures sont rangees automatiquement dans Documents/Facturation/Factures/
+// Les factures sont rangees automatiquement dans Facturation/Factures/
 // <Entreprise>/, un sous-dossier par entreprise (pas de boite de dialogue
-// "Enregistrer sous" a chaque fois : le nom de fichier suit le numero).
+// "Enregistrer sous" a chaque fois : le nom de fichier suit le numero). Le
+// dossier Facturation lui-meme vit sous le Bureau sur Windows, et sous
+// Documents sur macOS/Linux (voir dossierFacturationBase ci-dessous).
 function sanitizeForPath(name) {
   return (
     String(name || "")
@@ -268,8 +270,14 @@ function sanitizeForPath(name) {
   );
 }
 
+// Emplacement de base du dossier Facturation (PDF de factures, releves BIAT,
+// sauvegardes) : Bureau sur Windows, Documents ailleurs (macOS/Linux).
+function dossierFacturationBase() {
+  return process.platform === "win32" ? app.getPath("desktop") : app.getPath("documents");
+}
+
 function invoicesDirFor(company) {
-  const dir = path.join(app.getPath("documents"), "Facturation", "Factures", sanitizeForPath(company.company_name));
+  const dir = path.join(dossierFacturationBase(), "Facturation", "Factures", sanitizeForPath(company.company_name));
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -542,15 +550,26 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   // sur le gabarit actuel de l'entreprise plutot que de rester figee sur
   // "classic" par defaut — c'est un choix de presentation, pas une donnee
   // metier a geler comme le nom/l'adresse/le RIB.
+  //
+  // Meme logique de secours pour le reste des champs d'identite de
+  // l'entreprise (nom, adresse, RNE, matricule fiscal, tel, email, RIB) :
+  // une facture normalement enregistree via l'app garde son propre
+  // instantane figé (voulu, pour rester fidele a ce qui etait vrai au
+  // moment de l'emission). Mais une facture dont l'instantane est absent ou
+  // incomplet (import de donnees sans ce champ, ou migration vers un autre
+  // poste) retombe sur le profil actuel plutot que d'afficher un encart
+  // entreprise vide a l'impression.
   const companyActuelle = getCompanyById(record.companyId);
   const logoActuel = companyActuelle?.logo_data_url || "";
   const qrActuel = companyActuelle?.qr_data_url || "";
-  const company = {
-    ...(record.company || {}),
-    logo_data_url: record.company?.logo_data_url || logoActuel,
-    qr_data_url: record.company?.qr_data_url || qrActuel,
-    invoice_template: record.company?.invoice_template || companyActuelle?.invoice_template || "classic",
-  };
+  const CHAMPS_IDENTITE = ["company_name", "address", "rne", "tax_id", "phone", "email", "rib"];
+  const company = { ...(record.company || {}) };
+  for (const champ of CHAMPS_IDENTITE) {
+    if (!company[champ] && companyActuelle?.[champ]) company[champ] = companyActuelle[champ];
+  }
+  company.logo_data_url = record.company?.logo_data_url || logoActuel;
+  company.qr_data_url = record.company?.qr_data_url || qrActuel;
+  company.invoice_template = record.company?.invoice_template || companyActuelle?.invoice_template || "classic";
   const html = renderInvoiceHtml(company, record, { hideLogo: true });
 
   const printWindow = new BrowserWindow({

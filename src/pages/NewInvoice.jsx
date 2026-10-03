@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Calculatrice from "../components/Calculatrice.jsx";
 import ArticlesManager from "../components/ArticlesManager.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
+import FilterSuggestInput from "../components/FilterSuggestInput.jsx";
 
 const NOUVEL_ARTICLE = "__new_article__";
 const NOUVEAU_CLIENT = "__new_client__";
@@ -156,8 +157,28 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
     setLignes((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls));
   }
 
-  // Selection d'un article dans la liste : pre-remplit le code, la
-  // designation et le prix (tout reste modifiable ensuite ligne par ligne).
+  // Remplit code + designation par defaut + prix a partir d'un article du
+  // catalogue, sur une ligne donnee. Utilise aussi bien par le selecteur de
+  // code que par les suggestions du champ designation (voir plus bas) : les
+  // deux doivent aboutir exactement au meme resultat.
+  function applyArticleToLigne(i, article) {
+    setLignes((ls) =>
+      ls.map((l, idx) =>
+        idx === i
+          ? { ...l, code: article.code || "", designation: article.designation, prixUnitaire: article.prixUnitaire }
+          : l
+      )
+    );
+  }
+
+  // Selection d'un article par son CODE (comme sur un bon de commande) :
+  // pre-remplit le code, la designation par defaut et le prix. La
+  // designation reste ensuite modifiable ligne par ligne (voir updateLigne
+  // plus bas) SANS que ça cree ou modifie quoi que ce soit dans le
+  // catalogue : c'est juste le libelle imprime sur cette facture precise.
+  // Le code, lui, reste le lien stable vers l'article du catalogue (utilise
+  // notamment par l'onglet Productions pour regrouper les quantites par
+  // article malgre des libelles retouches facture par facture).
   // Choisir "+ Nouvel article" ouvre plutot la fenetre de gestion.
   function handleArticleSelect(i, value) {
     if (value === NOUVEL_ARTICLE) {
@@ -166,13 +187,17 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
     }
     const article = articles.find((a) => a.id === value);
     if (!article) return;
-    setLignes((ls) =>
-      ls.map((l, idx) =>
-        idx === i
-          ? { ...l, code: article.code || "", designation: article.designation, prixUnitaire: article.prixUnitaire }
-          : l
-      )
-    );
+    applyArticleToLigne(i, article);
+  }
+
+  // Suggestions sous le champ Designation, filtrees au fur et a mesure de la
+  // frappe (voir FilterSuggestInput) : choisir une suggestion remplit tout
+  // (meme resultat que par le code), mais rien n'oblige a en choisir une —
+  // taper un libelle different ou retouche reste un simple texte libre,
+  // sans toucher au catalogue (meme principe que la frappe directe dans le
+  // champ, voir le commentaire au-dessus de handleArticleSelect).
+  function handleDesignationPick(i, article) {
+    applyArticleToLigne(i, article);
   }
 
   // Applique un article (nouvellement cree ou existant, cliqué dans la
@@ -316,10 +341,10 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
     }
   }
 
-  if (loadingRecord) return <div className="page">Chargement...</div>;
+  if (loadingRecord) return <div className="page page-wide">Chargement...</div>;
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <div className="page-header-row">
         <div>
           <h1>{editingId ? "Modifier la facture" : "Nouvelle facture"}</h1>
@@ -430,34 +455,42 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
         <table className="lignes-editor">
           <thead>
             <tr>
-              <th style={{ width: "12%" }}>Code</th>
+              <th style={{ width: "14%" }}>Code</th>
               <th>Designation</th>
               <th style={{ width: "10%" }}>Qte</th>
-              <th style={{ width: "16%" }}>P.U.HT (DT)</th>
-              <th style={{ width: "16%" }}>Total</th>
-              <th style={{ width: "5%" }}></th>
+              <th style={{ width: "14%" }}>P.U.HT (DT)</th>
+              <th style={{ width: "14%" }}>Total</th>
+              <th style={{ width: "4%" }}></th>
             </tr>
           </thead>
           <tbody>
             {lignes.map((l, i) => (
               <tr key={i}>
                 <td>
-                  <input
-                    type="text"
-                    value={l.code}
-                    onChange={(e) => updateLigne(i, "code", e.target.value)}
-                  />
-                </td>
-                <td>
                   <SearchableSelect
                     items={articles}
                     getId={(a) => a.id}
-                    getLabel={(a) => a.designation}
-                    getCode={(a) => a.code || ""}
-                    value={articles.find((a) => a.designation === l.designation)?.id || ""}
+                    getLabel={(a) => a.code || a.designation}
+                    getCode={(a) => (a.code ? a.designation : "")}
+                    value={
+                      (l.code
+                        ? articles.find((a) => a.code && a.code.toLowerCase() === l.code.toLowerCase())?.id
+                        : articles.find((a) => !a.code && a.designation === l.designation)?.id) || ""
+                    }
                     onSelect={(val) => handleArticleSelect(i, val)}
                     extraOption={{ value: NOUVEL_ARTICLE, label: "+ Nouvel article..." }}
-                    placeholder={l.designation || "Choisir un article..."}
+                    placeholder={l.code || "Choisir un article..."}
+                  />
+                </td>
+                <td>
+                  <FilterSuggestInput
+                    items={articles}
+                    getLabel={(a) => a.designation}
+                    getCode={(a) => a.code || ""}
+                    value={l.designation}
+                    onChange={(text) => updateLigne(i, "designation", text)}
+                    onPick={(article) => handleDesignationPick(i, article)}
+                    placeholder="Designation"
                   />
                 </td>
                 <td>
@@ -465,8 +498,11 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
                     type="number"
                     min="0"
                     step="any"
+                    className="qte-input"
                     value={l.quantite}
                     onChange={(e) => updateLigne(i, "quantite", e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onMouseUp={(e) => e.preventDefault()}
                   />
                 </td>
                 <td>

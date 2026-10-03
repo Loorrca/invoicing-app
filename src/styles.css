@@ -278,6 +278,13 @@ table.lignes-editor select {
 table.lignes-editor input:hover,
 table.lignes-editor select:hover { border-color: var(--border); }
 
+/* Case Qte : large d'au moins ~4 chiffres, nombre toujours lisible/visible */
+table.lignes-editor input.qte-input {
+  min-width: 4.5ch;
+  text-align: center;
+  font-size: 15px;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -820,6 +827,14 @@ table.invoices-table td.num { text-align: right; }
 .searchable-select {
   position: relative;
   width: 100%;
+}
+
+/* Le champ affiche "CODE (designation)" une fois un article choisi (voir
+   SearchableSelect.jsx) : peut depasser la largeur de la colonne Code sur
+   la grille de la facture, qui reste volontairement etroite. Coupe
+   proprement avec des points de suspension plutot qu'un cut-off brutal. */
+.searchable-select input {
+  text-overflow: ellipsis;
 }
 
 .searchable-select-list {

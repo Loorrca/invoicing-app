@@ -5,9 +5,11 @@ const EMPTY = {
   address: "",
   rne: "",
   tax_id: "",
+  tel_fax: "",
   phone: "",
   email: "",
   rib: "",
+  siege: "",
   logo_data_url: "",
   qr_data_url: "",
   invoice_template: "classic",
@@ -41,7 +43,6 @@ export default function Settings({ activeCompany, onSaved }) {
   const [values, setValues] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null); // { kind: "ok"|"error", text }
-  const [exportingLogo, setExportingLogo] = useState(false);
   const fileInputRef = useRef(null);
   const qrInputRef = useRef(null);
 
@@ -73,31 +74,6 @@ export default function Settings({ activeCompany, onSaved }) {
     if (!file) return;
     const dataUrl = await resizeImage(file, 500);
     update("qr_data_url", dataUrl);
-  }
-
-  // Exporte un PDF ne contenant que le logo, a la meme place que sur une
-  // facture (en-tete en haut a gauche) et rien d'autre : destine a etre
-  // imprime en couleur sur le papier qui servira ensuite de support aux
-  // factures elles-memes (celles-ci sont imprimees sans logo, voir l'onglet
-  // Factures). Exporte toujours le logo actuellement affiche ci-dessus,
-  // meme si "Enregistrer" n'a pas encore ete clique.
-  async function handleExportLogoTemplate() {
-    setStatus(null);
-    setExportingLogo(true);
-    try {
-      const result = await window.api.exportLogoTemplate(values.logo_data_url);
-      if (!result.ok) {
-        if (!result.canceled) {
-          setStatus({ kind: "error", text: result.error || "Impossible d'exporter le gabarit logo." });
-        }
-      } else {
-        setStatus({ kind: "ok", text: `Gabarit logo enregistre : ${result.filePath}` });
-      }
-    } catch (err) {
-      setStatus({ kind: "error", text: String(err?.message || err) });
-    } finally {
-      setExportingLogo(false);
-    }
   }
 
   async function handleSave(e) {
@@ -136,23 +112,13 @@ export default function Settings({ activeCompany, onSaved }) {
               Choisir une image
             </button>
             {values.logo_data_url && (
-              <>
-                <button
-                  type="button"
-                  className="btn link"
-                  onClick={() => update("logo_data_url", "")}
-                >
-                  Retirer le logo
-                </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={handleExportLogoTemplate}
-                  disabled={exportingLogo}
-                >
-                  {exportingLogo ? "Export..." : "Telecharger le gabarit logo (PDF)"}
-                </button>
-              </>
+              <button
+                type="button"
+                className="btn link"
+                onClick={() => update("logo_data_url", "")}
+              >
+                Retirer le logo
+              </button>
             )}
             <input
               ref={fileInputRef}
@@ -229,7 +195,15 @@ export default function Settings({ activeCompany, onSaved }) {
             />
           </label>
           <label>
-            Telephone
+            Tel/fax
+            <input
+              type="text"
+              value={values.tel_fax}
+              onChange={(e) => update("tel_fax", e.target.value)}
+            />
+          </label>
+          <label>
+            Mobile
             <input
               type="text"
               value={values.phone}
@@ -250,6 +224,15 @@ export default function Settings({ activeCompany, onSaved }) {
               type="text"
               value={values.rib}
               onChange={(e) => update("rib", e.target.value)}
+            />
+          </label>
+          <label>
+            Siege (agence RIB)
+            <input
+              type="text"
+              value={values.siege}
+              onChange={(e) => update("siege", e.target.value)}
+              placeholder="Nom du siege de la banque"
             />
           </label>
         </div>

@@ -13,9 +13,11 @@ const COMPANY_DEFAULTS = {
   address: "",
   rne: "",
   tax_id: "",
+  tel_fax: "",
   phone: "",
   email: "",
   rib: "",
+  siege: "",
   logo_data_url: "",
   qr_data_url: "",
   // Gabarit de facture ("classic" ou "lignes" — voir invoiceTemplate.js) :

@@ -16,16 +16,14 @@ let invoices = null; // [{ id, companyId, numero, date, client, ..., company, to
 // changent quasiment jamais, et ne sont jamais relus depuis cet instantane a
 // l'affichage d'une facture deja generee : le PDF original, lui, est fige
 // independamment de ce JSON (invoice:generatePdf l'ecrit une fois pour
-// toutes avec les images du moment). Seule l'impression sans logo (papier a
-// en-tete deja preimprime, voir invoice:print dans main.js) relit
-// l'instantane — et toujours de facon invisible pour le logo (hideLogo),
-// seule la presence d'une image dans le DOM comptant pour la mise en page ;
-// le QR, lui, reste affiche normalement a l'impression, mais retombe aussi
-// sur la version actuelle de l'entreprise. Les dupliquer sur chaque facture
-// n'apportait donc rien et representait, a lui seul, 99 % du poids de ce
-// fichier (13,7 Mo sur 13,8 Mo mesures rien que pour le logo) : on les
-// retire des instantanes, a l'ecriture comme au chargement (migration des
-// factures deja enregistrees).
+// toutes avec les images du moment). Seule la reimpression (voir
+// invoice:print dans main.js) relit l'instantane — logo et QR retombent
+// alors tous les deux sur la version actuelle de l'entreprise, et restent
+// bien visibles a l'impression. Les dupliquer sur chaque facture n'apportait
+// donc rien et representait, a lui seul, 99 % du poids de ce fichier (13,7
+// Mo sur 13,8 Mo mesures rien que pour le logo) : on les retire des
+// instantanes, a l'ecriture comme au chargement (migration des factures
+// deja enregistrees).
 const CHAMPS_MEDIAS = ["logo_data_url", "qr_data_url"];
 
 function sansLogo(company) {

@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld("api", {
   setActiveCompany: (id) => ipcRenderer.invoke("companies:setActive", id),
   saveActiveCompany: (fields) => ipcRenderer.invoke("companies:saveActive", fields),
   addCompany: (fields) => ipcRenderer.invoke("companies:add", fields),
-  exportLogoTemplate: (logoDataUrl) => ipcRenderer.invoke("company:exportLogoTemplate", logoDataUrl),
   listArticles: () => ipcRenderer.invoke("articles:list"),
   addArticle: (fields) => ipcRenderer.invoke("articles:add", fields),
   updateArticle: (id, fields) => ipcRenderer.invoke("articles:update", { id, fields }),

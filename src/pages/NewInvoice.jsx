@@ -19,15 +19,43 @@ function emptyClientDraft() {
   return { nom: "", code: "", adresse: "" };
 }
 
+// Le dinar tunisien n'a pas de sous-unite en dessous du millime (3 decimales) :
+// un prix unitaire ne doit donc jamais afficher ou utiliser un 4e chiffre
+// apres la virgule (ex. 16 HT + FODEC 1% + TVA 19% = 19,2304 — ce 4e chiffre
+// n'existe dans aucune monnaie reelle). On arrondit au millime le plus proche
+// (1-4 vers le bas, 5-9 vers le haut) AVANT tout calcul ou affichage, et on
+// reutilise ce prix arrondi pour le Total de la ligne, pour que le P.U.HT
+// affiche x la Qte affichee redonne exactement le Total affiche. Meme regle
+// que electron/lib/invoiceTemplate.js (voir arrondirMillime la-bas).
+function round(n) {
+  return Math.round((Number(n) || 0) * 1000) / 1000;
+}
+
 // Reprend exactement la formule du gabarit PDF (electron/lib/invoiceTemplate.js) :
 // le timbre fiscal, saisi a la main et optionnel, s'ajoute au TTC sans etre
 // soumis a la T.V.A ni au FODEC.
+//
+// Le TOTAL T.T.C n'est plus calcule en taxant le sous-total HT global une
+// seule fois : chaque ligne calcule son propre prix unitaire TTC, arrondi au
+// millime le plus proche, PUIS multiplie par la quantite — pour que "300 x 16
+// HT" retombe sur un TOTAL T.T.C de 5 769,000 (et non 5 769,120, qui gardait
+// un residu de 0,0004 DT par piece non representable en dinars). Le
+// sous-total HT et le FODEC restent calcules normalement ; la T.V.A affichee
+// est deduite du TTC reellement facture (TTC - HT - FODEC) pour que les
+// trois lignes du recapitulatif se recoupent exactement avec le TOTAL T.T.C.
 function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
-  const ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
+  const tauxFodec = avecFodec ? 0.01 : 0;
+  let ht = 0;
+  let ttc = 0;
+  for (const l of lignes) {
+    const qte = Number(l.quantite) || 0;
+    const puHt = round(l.prixUnitaire);
+    const puTtc = round(puHt * (1 + tauxFodec) * 1.19);
+    ht += qte * puHt;
+    ttc += qte * puTtc;
+  }
   const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
-  const ttc = ht + fodec + tva;
-  const round = (n) => Math.round(n * 1000) / 1000;
+  const tva = ttc - ht - fodec;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   return {
     ht: round(ht),
@@ -513,7 +541,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
                     onChange={(e) => updateLigne(i, "prixUnitaire", e.target.value)}
                   />
                 </td>
-                <td className="num">{fmt((Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0))}</td>
+                <td className="num">{fmt((Number(l.quantite) || 0) * round(l.prixUnitaire))}</td>
                 <td>
                   <button type="button" className="btn icon" onClick={() => removeLigne(i)} aria-label="Supprimer la ligne">
                     &times;

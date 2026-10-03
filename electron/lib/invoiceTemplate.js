@@ -21,6 +21,18 @@ function formatMontant(n) {
   return n.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
+// Le dinar tunisien n'a pas de sous-unite en dessous du millime (3 decimales) :
+// un prix unitaire ne doit donc jamais afficher ou utiliser un 4e chiffre
+// apres la virgule (ex. 16 HT + FODEC 1% + TVA 19% = 19,2304 — ce 4e chiffre
+// n'existe dans aucune monnaie reelle). On arrondit au millime le plus proche
+// (1-4 vers le bas, 5-9 vers le haut, comme Math.round) AVANT tout calcul ou
+// affichage, et on reutilise ce prix arrondi pour le Total de la ligne : le
+// P.U.HT imprime x la Qte imprimee redonne alors exactement le Total imprime,
+// au lieu de deux chiffres qui ne se recoupent pas sur le papier.
+function arrondirMillime(n) {
+  return Math.round((Number(n) || 0) * 1000) / 1000;
+}
+
 function formatDate(d) {
   if (!d) return "";
   const date = d instanceof Date ? d : new Date(d);
@@ -32,21 +44,39 @@ function formatDate(d) {
 // annees/textes), optionnel : certaines factures (marches publics, clients
 // exoneres...) n'en portent pas. Ne s'ajoute qu'apres coup, sans etre soumis
 // a la T.V.A ni au FODEC.
+//
+// Le TOTAL T.T.C n'est plus calcule en taxant le sous-total HT global une
+// seule fois (ce qui pouvait laisser un 4e chiffre invisible, ex. 16 HT ->
+// 19,2304 par piece avant meme d'etre multiplie) : chaque ligne calcule son
+// propre prix unitaire TTC, arrondi au millime le plus proche, PUIS multiplie
+// par la quantite — comme demande, pour que "300 x 16 HT" retombe sur un
+// TOTAL T.T.C de 5 769,000 (et non 5 769,120, qui gardait un residu de
+// 0,0004 DT par piece non representable en dinars). Le sous-total HT et le
+// FODEC restent calcules normalement ; la T.V.A affichee est deduite du TTC
+// reellement facture (TTC - HT - FODEC) pour que les trois lignes du
+// recapitulatif se recoupent exactement avec le TOTAL T.T.C imprime.
 function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
-  const ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0), 0);
+  const tauxFodec = avecFodec ? 0.01 : 0;
+  let ht = 0;
+  let ttc = 0;
+  for (const l of lignes) {
+    const qte = Number(l.quantite) || 0;
+    const puHt = arrondirMillime(l.prixUnitaire);
+    const puTtc = arrondirMillime(puHt * (1 + tauxFodec) * 1.19);
+    ht += qte * puHt;
+    ttc += qte * puTtc;
+  }
   const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
-  const ttc = ht + fodec + tva;
-  const arrondir = (n) => Math.round(n * 1000) / 1000;
+  const tva = ttc - ht - fodec;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   const totalGeneral = ttc + timbreApplique;
   return {
-    ht: arrondir(ht),
-    fodec: arrondir(fodec),
-    tva: arrondir(tva),
-    ttc: arrondir(ttc),
-    timbre: arrondir(timbreApplique),
-    totalGeneral: arrondir(totalGeneral),
+    ht: arrondirMillime(ht),
+    fodec: arrondirMillime(fodec),
+    tva: arrondirMillime(tva),
+    ttc: arrondirMillime(ttc),
+    timbre: arrondirMillime(timbreApplique),
+    totalGeneral: arrondirMillime(totalGeneral),
   };
 }
 
@@ -54,7 +84,11 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
  * Produit le HTML imprimable d'une facture (letterhead + tableau + totaux
  * + montant en toutes lettres), pret a etre transforme en PDF.
  *
- * @param {object} company  { company_name, address, rne, tax_id, phone, email, rib, logo_data_url, qr_data_url, invoice_template }
+ * @param {object} company  { company_name, address, rne, tax_id, tel_fax, phone, email, rib, siege, logo_data_url, qr_data_url, invoice_template }
+ *   `tel_fax` et `phone` (affiche "Mob") sont tous les deux optionnels et
+ *   independants — certaines entreprises (ex. MASTERFLAG) n'ont pas de
+ *   tel/fax, seulement un mobile. `siege` est le nom du siege/agence de la
+ *   banque associe au RIB, affiche sous la boite "Coordonnees bancaires".
  *   `invoice_template` : "classic" (par defaut) ou "lignes" — deux gabarits
  *   visuels au choix par entreprise (meme position de logo/en-tete, memes
  *   donnees, seule la mise en forme du tableau/des totaux/des encadres
@@ -64,20 +98,8 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
  * @param {object} invoice  { numero, date, client, bonCommande, bonLivraison, lignes, avecFodec, avecTimbre, timbre }
  *   `client` est soit une chaine (anciennes factures), soit un instantane
  *   { id, nom, code, adresse } venant du catalogue clients.
- * @param {object} options  { hideLogo, onlyLogo }
- *   - hideLogo : impression sur papier a en-tete deja preimprime avec le
- *     logo en couleur — rend le logo INVISIBLE mais garde la meme image/les
- *     memes dimensions a sa place (au lieu de ne rien afficher du tout) :
- *     sans ca, le nom/l'adresse de l'entreprise glissent tout a gauche pour
- *     combler l'espace du logo absent, et se retrouvent a chevaucher le
- *     logo deja imprime sur le papier.
- *   - onlyLogo : l'inverse — pour imprimer/exporter le papier a en-tete
- *     lui-meme (juste le logo en couleur, a la bonne place), on cache tout
- *     le reste (textes, cadres, tableau...) et on ne garde que le logo
- *     visible, au meme endroit exact que sur une facture normale (meme
- *     gabarit HTML/CSS, donc meme position garantie).
  */
-function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
+function renderInvoiceHtml(company = {}, invoice = {}) {
   // Deux gabarits au choix par entreprise (voir le commentaire JSDoc
   // ci-dessus) : "lignes" reste le seul autre cas reconnu, toute autre
   // valeur (y compris absente) retombe sur "classic" par securite.
@@ -86,6 +108,14 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
   // l'utilise (TEXBANNER, gabarit "classic") — jamais affiche sur "lignes",
   // meme si un QR a ete enregistre par erreur sur ce profil.
   const showQr = variant === "classic" && !!company.qr_data_url;
+  // Tel/fax et Mob (ex-"phone") sur la meme ligne, l'email juste en dessous
+  // (voir le bloc .company .meta plus bas) : certaines entreprises n'ont pas
+  // de tel/fax (ex. MASTERFLAG) donc chaque partie est omise si vide, comme
+  // le reste des champs d'identite de ce bloc.
+  const telMobParts = [];
+  if (company.tel_fax) telMobParts.push(`Tel/fax : ${escapeHtml(company.tel_fax)}`);
+  if (company.phone) telMobParts.push(`Mob : ${escapeHtml(company.phone)}`);
+  const telMobLine = telMobParts.join("  ");
   const lignes = invoice.lignes || [];
   const avecFodec = invoice.avecFodec !== false;
   const avecTimbre = !!invoice.avecTimbre;
@@ -98,13 +128,14 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
   const montantLettres = montantEnLettresDT(totalGeneral);
 
   const lignesHtml = lignes.map((l) => {
-    const total = (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0);
+    const prixUnitaire = arrondirMillime(l.prixUnitaire);
+    const total = (Number(l.quantite) || 0) * prixUnitaire;
     return `
       <tr>
         <td class="code">${escapeHtml(l.code || "")}</td>
         <td class="designation" dir="${dirAuto(l.designation)}">${escapeHtml(l.designation)}</td>
         <td class="num">${formatMontant(l.quantite).replace(",000", "")}</td>
-        <td class="num">${formatMontant(l.prixUnitaire)}</td>
+        <td class="num">${formatMontant(prixUnitaire)}</td>
         <td class="num">${formatMontant(total)}</td>
       </tr>`;
   }).join("");
@@ -377,18 +408,13 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
     font-weight: 700;
     font-size: 12pt;
   }
-  /* Gabarit "logo seul" (papier a en-tete a preimprimer) : on masque tout
-     le reste de la page (visibility:hidden est herite par tous les
-     descendants) et on ne redonne la visibilite qu'au logo, qui garde ainsi
-     exactement la meme position que sur une facture normale. */
-  ${options.onlyLogo ? "body.only-logo { visibility: hidden; } body.only-logo .company img { visibility: visible; }" : ""}
 </style>
 </head>
-<body class="${[options.onlyLogo ? "only-logo" : "", variant === "lignes" ? "variant-lignes" : ""].filter(Boolean).join(" ")}">
+<body class="${variant === "lignes" ? "variant-lignes" : ""}">
   <div class="letterhead">
     <div class="company">
       ${company.logo_data_url
-        ? `<img src="${company.logo_data_url}" alt="logo"${options.hideLogo ? ' style="visibility:hidden"' : ""} />`
+        ? `<img src="${company.logo_data_url}" alt="logo" />`
         : ""}
       <div>
         <p class="name">${escapeHtml(company.company_name)}</p>
@@ -396,7 +422,8 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
           ${company.address ? escapeHtml(company.address) + "<br/>" : ""}
           ${company.rne ? "RNE : " + escapeHtml(company.rne) + "<br/>" : ""}
           ${company.tax_id ? "Matricule Fiscal : " + escapeHtml(company.tax_id) + "<br/>" : ""}
-          ${company.phone ? "Tel : " + escapeHtml(company.phone) + " " : ""}${company.email ? escapeHtml(company.email) : ""}
+          ${telMobLine ? telMobLine + "<br/>" : ""}
+          ${company.email ? escapeHtml(company.email) : ""}
         </p>
       </div>
     </div>
@@ -450,6 +477,7 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
       <div class="signature-box">
         <p class="signature-label">Coordonn&eacute;es bancaires</p>
         ${company.rib ? `<p class="signature-content">RIB : ${escapeHtml(company.rib)}</p>` : ""}
+        ${company.siege ? `<p class="signature-content">Si&egrave;ge : ${escapeHtml(company.siege)}</p>` : ""}
       </div>
       <div class="signature-box">
         <p class="signature-label">Cachet et signature</p>

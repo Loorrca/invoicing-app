@@ -511,21 +511,15 @@ ipcMain.handle("invoice:renderHtml", (_event, invoice) => {
 });
 
 // Imprime une facture deja enregistree (depuis l'onglet Factures) : meme
-// mise en page que le PDF, mais avec le logo rendu INVISIBLE (quelle que
-// soit l'entreprise, TEXBANNER ou MASTERFLAG) car on imprime sur du papier a
-// en-tete deja preimprime avec le logo en couleur — un logo pose par-dessus
-// un logo papier ferait doublon, et nos imprimantes sont en noir et blanc de
-// toute facon. Le logo garde sa place (meme image, memes dimensions, juste
-// invisible) plutot que d'etre retire : sinon le nom/l'adresse de
-// l'entreprise glissent tout a gauche pour combler l'espace vide et se
-// retrouvent a chevaucher le logo deja imprime sur le papier.
+// mise en page que le PDF, logo compris (impression couleur directe,
+// l'entreprise n'utilise plus de papier a en-tete preimprime).
 // On utilise l'instantane `company` garde sur la facture au moment de son
 // emission (pas le profil actuel), comme pour le reste de l'affichage.
 //
 // Si au moins une imprimante est detectee sur la machine, on ouvre la boite
 // d'impression native du systeme (l'utilisateur choisit l'imprimante/le bac
 // papier et confirme). Sinon, on retombe sur une boite "Enregistrer sous"
-// pour exporter un PDF sans logo a l'emplacement de son choix.
+// pour exporter le PDF a l'emplacement de son choix.
 function printWindowAndWait(win, options) {
   return new Promise((resolve) => {
     win.webContents.print(options, (success, failureReason) => {
@@ -540,11 +534,8 @@ ipcMain.handle("invoice:print", async (_event, id) => {
 
   // L'instantane `company` de la facture ne garde plus le logo ni le QR code
   // (voir invoices.js) : on retombe ici sur la version actuelle de
-  // l'entreprise de la facture pour les deux. Pour le logo, sans consequence
-  // visuelle puisqu'il reste invisible (hideLogo), seule sa presence dans le
-  // DOM compte pour que le nom/l'adresse ne glissent pas a gauche. Le QR,
-  // lui, doit au contraire rester bien visible a l'impression (il n'est pas
-  // deja present sur le papier a en-tete preimprime, contrairement au logo).
+  // l'entreprise de la facture pour les deux, qui doivent tous les deux
+  // rester bien visibles a l'impression.
   // Le gabarit (`invoice_template`) suit la meme logique que le logo/QR : une
   // ancienne facture (snapshot enregistre avant l'ajout de ce champ) retombe
   // sur le gabarit actuel de l'entreprise plutot que de rester figee sur
@@ -552,7 +543,8 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   // metier a geler comme le nom/l'adresse/le RIB.
   //
   // Meme logique de secours pour le reste des champs d'identite de
-  // l'entreprise (nom, adresse, RNE, matricule fiscal, tel, email, RIB) :
+  // l'entreprise (nom, adresse, RNE, matricule fiscal, tel/fax, mobile,
+  // email, RIB, siege) :
   // une facture normalement enregistree via l'app garde son propre
   // instantane figé (voulu, pour rester fidele a ce qui etait vrai au
   // moment de l'emission). Mais une facture dont l'instantane est absent ou
@@ -562,7 +554,7 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   const companyActuelle = getCompanyById(record.companyId);
   const logoActuel = companyActuelle?.logo_data_url || "";
   const qrActuel = companyActuelle?.qr_data_url || "";
-  const CHAMPS_IDENTITE = ["company_name", "address", "rne", "tax_id", "phone", "email", "rib"];
+  const CHAMPS_IDENTITE = ["company_name", "address", "rne", "tax_id", "tel_fax", "phone", "email", "rib", "siege"];
   const company = { ...(record.company || {}) };
   for (const champ of CHAMPS_IDENTITE) {
     if (!company[champ] && companyActuelle?.[champ]) company[champ] = companyActuelle[champ];
@@ -570,7 +562,7 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   company.logo_data_url = record.company?.logo_data_url || logoActuel;
   company.qr_data_url = record.company?.qr_data_url || qrActuel;
   company.invoice_template = record.company?.invoice_template || companyActuelle?.invoice_template || "classic";
-  const html = renderInvoiceHtml(company, record, { hideLogo: true });
+  const html = renderInvoiceHtml(company, record);
 
   const printWindow = new BrowserWindow({
     show: false,
@@ -621,37 +613,6 @@ ipcMain.handle("invoice:print", async (_event, id) => {
     return { ok: false, error: err.message || String(err) };
   } finally {
     printWindow.destroy();
-  }
-});
-
-// Exporte le gabarit du papier a en-tete (onglet Entreprise) : la facture
-// normale, mais avec UNIQUEMENT le logo visible (a la meme place exacte que
-// sur une facture, meme gabarit HTML/CSS) et tout le reste masque. Destine a
-// etre imprime en couleur une fois sur une pile de papier, qui sert ensuite
-// de support aux factures elles-memes (imprimees en noir et blanc, logo
-// masque — voir invoice:print ci-dessus).
-// On recoit le logo directement depuis le formulaire (pas forcement encore
-// enregistre) : le gabarit exporte doit toujours refleter ce qui est affiche
-// a l'ecran au moment du clic, pas la derniere version enregistree.
-ipcMain.handle("company:exportLogoTemplate", async (_event, logoDataUrl) => {
-  if (!logoDataUrl) {
-    return { ok: false, error: "Choisissez d'abord un logo (onglet Entreprise)." };
-  }
-  const company = getActiveCompany();
-  const html = renderInvoiceHtml({ logo_data_url: logoDataUrl }, {}, { onlyLogo: true });
-
-  const result = await dialog.showSaveDialog(mainWindow, {
-    title: "Exporter le gabarit logo (papier a en-tete)",
-    defaultPath: `gabarit-logo-${sanitizeForPath(company.company_name || "entreprise")}.pdf`,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
-
-  try {
-    await writePdfToFile(html, result.filePath);
-    return { ok: true, filePath: result.filePath };
-  } catch (err) {
-    return { ok: false, error: err.message || String(err) };
   }
 });
 

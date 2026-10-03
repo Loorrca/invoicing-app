@@ -502,7 +502,6 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
                     value={l.quantite}
                     onChange={(e) => updateLigne(i, "quantite", e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    onMouseUp={(e) => e.preventDefault()}
                   />
                 </td>
                 <td>

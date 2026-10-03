@@ -170,7 +170,18 @@ function renderInvoiceHtml(company = {}, invoice = {}, options = {}) {
 <title>Facture ${escapeHtml(invoice.numero || "")}</title>
 <style>
   @page { size: A4; margin: 14mm 12mm; }
-  * { box-sizing: border-box; }
+  * {
+    box-sizing: border-box;
+    /* Sans cette ligne, certains pilotes d'imprimante (notamment sous
+       Windows) economisent l'encre en attenuant ou en supprimant les
+       aplats de couleur CSS (ex. l'en-tete noir du tableau d'articles) a
+       l'impression native — alors que l'export PDF (printToPDF) n'a jamais
+       ce probleme, lui, car il ne passe par aucun pilote. Cette propriete
+       force le moteur de rendu a garder la couleur exacte, sur toutes les
+       plateformes. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
   body {
     font-family: "Segoe UI", Tahoma, Arial, sans-serif;
     color: #1a1a1a;

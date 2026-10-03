@@ -383,7 +383,12 @@ async function ajouterNumerosDePage(pdfBuffer) {
   }
 }
 
-async function writePdfToFile(html, filePath) {
+// Rend le HTML de la facture en PDF (numeros de page ajoutes), via le moteur
+// de rendu de Chromium (printToPDF) plutot que via le pipeline d'impression
+// natif du systeme. C'est le coeur de "Enregistrer" (writePdfToFile ci-
+// dessous), mais aussi, depuis peu, de "Imprimer" (voir invoice:print) : voir
+// le commentaire dans invoice:print pour la raison de ce choix.
+async function renderHtmlToPdfBuffer(html) {
   const pdfWindow = new BrowserWindow({
     show: false,
     width: LARGEUR_ZONE_IMPRIMABLE_PX,
@@ -399,10 +404,15 @@ async function writePdfToFile(html, filePath) {
       margins: { marginType: "none" },
     });
     pdfBuffer = await ajouterNumerosDePage(pdfBuffer);
-    fs.writeFileSync(filePath, pdfBuffer);
+    return pdfBuffer;
   } finally {
     pdfWindow.destroy();
   }
+}
+
+async function writePdfToFile(html, filePath) {
+  const pdfBuffer = await renderHtmlToPdfBuffer(html);
+  fs.writeFileSync(filePath, pdfBuffer);
 }
 
 ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
@@ -584,21 +594,54 @@ ipcMain.handle("invoice:print", async (_event, id) => {
 
     const printers = await printWindow.webContents.getPrintersAsync();
     if (printers.length > 0) {
-      const { success, failureReason } = await printWindowAndWait(printWindow, {
-        silent: false,
-        printBackground: true,
-        pageSize: "A4",
-        margins: { marginType: "none" },
+      // On n'envoie PAS le HTML brut au pipeline d'impression natif du
+      // systeme (win.webContents.print() directement sur `printWindow`) :
+      // certains pilotes d'imprimante (notamment sous Windows) n'honorent
+      // pas fidelement l'option printBackground lors d'une impression
+      // native, et traitent le fond noir de l'en-tete comme un simple
+      // "arriere-plan de page" qu'ils sont libres d'attenuer ou d'ignorer —
+      // ce qui fait ressortir l'en-tete delave/gris avec le texte blanc
+      // (prevu pour un fond noir) quasi invisible. "Enregistrer" n'a jamais
+      // ce probleme car il passe uniquement par printToPDF (le moteur de
+      // rendu de Chromium, sans pilote), jamais par ce pipeline natif.
+      //
+      // La parade : on genere nous-memes le PDF via printToPDF (meme chemin
+      // que "Enregistrer", donc fiable), puis on imprime CE PDF deja rendu
+      // (via la visionneuse PDF integree d'Electron) plutot que le HTML.
+      // Dans un PDF deja rasterise, le bloc de couleur de l'en-tete fait
+      // partie du contenu normal de la page (un remplissage vectoriel comme
+      // un autre), pas d'un "arriere-plan" special — le pilote d'imprimante
+      // n'a alors aucune raison de le traiter differemment du reste.
+      const pdfBuffer = await renderHtmlToPdfBuffer(html);
+      const tmpPdfPath = path.join(
+        app.getPath("temp"),
+        `facture-impression-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`
+      );
+      fs.writeFileSync(tmpPdfPath, pdfBuffer);
+
+      const pdfPrintWindow = new BrowserWindow({
+        show: false,
+        webPreferences: { plugins: true },
       });
-      if (!success) {
-        // L'utilisateur a pu simplement annuler la boite d'impression : ce
-        // n'est pas une erreur a afficher en rouge.
-        if (failureReason === "cancelled" || failureReason === "canceled") {
-          return { ok: false, canceled: true };
+      try {
+        await pdfPrintWindow.loadURL(pathToFileURL(tmpPdfPath).toString());
+        const { success, failureReason } = await printWindowAndWait(pdfPrintWindow, {
+          silent: false,
+          printBackground: true,
+        });
+        if (!success) {
+          // L'utilisateur a pu simplement annuler la boite d'impression : ce
+          // n'est pas une erreur a afficher en rouge.
+          if (failureReason === "cancelled" || failureReason === "canceled") {
+            return { ok: false, canceled: true };
+          }
+          return { ok: false, error: failureReason || "Echec de l'impression." };
         }
-        return { ok: false, error: failureReason || "Echec de l'impression." };
+        return { ok: true, printed: true };
+      } finally {
+        pdfPrintWindow.destroy();
+        fs.unlink(tmpPdfPath, () => {});
       }
-      return { ok: true, printed: true };
     }
 
     // Aucune imprimante detectee : on propose d'enregistrer un PDF a la place.
@@ -609,12 +652,7 @@ ipcMain.handle("invoice:print", async (_event, id) => {
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
 
-    let pdfBuffer = await printWindow.webContents.printToPDF({
-      printBackground: true,
-      pageSize: "A4",
-      margins: { marginType: "none" },
-    });
-    pdfBuffer = await ajouterNumerosDePage(pdfBuffer);
+    const pdfBuffer = await renderHtmlToPdfBuffer(html);
     fs.writeFileSync(result.filePath, pdfBuffer);
     return { ok: true, saved: true, filePath: result.filePath };
   } catch (err) {

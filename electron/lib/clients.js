@@ -40,12 +40,25 @@ function listClients() {
   return [...clients].sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
 }
 
+// Code client auto-genere : toujours 3 chiffres ("001", "002", ...), le
+// premier numero de la plage 001-999 qui n'est pas deja utilise par un
+// client existant. Evite les doublons sans demander a l'utilisateur de s'en
+// occuper lui-meme a la creation.
+function genererCodeClient() {
+  const utilises = new Set(clients.map((c) => c.code));
+  for (let n = 1; n <= 999; n++) {
+    const code = String(n).padStart(3, "0");
+    if (!utilises.has(code)) return code;
+  }
+  throw new Error("Plus de code client disponible (001 a 999 tous utilises)");
+}
+
 function addClient(fields = {}) {
   const nom = String(fields.nom || "").trim();
-  const code = String(fields.code || "").trim();
   const adresse = String(fields.adresse || "").trim();
   if (!nom) throw new Error("Nom du client requis");
 
+  const code = genererCodeClient();
   const client = { id: crypto.randomUUID(), nom, code, adresse };
   clients.push(client);
   persist();

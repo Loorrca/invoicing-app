@@ -45,29 +45,53 @@ function formatDate(d) {
 // exoneres...) n'en portent pas. Ne s'ajoute qu'apres coup, sans etre soumis
 // a la T.V.A ni au FODEC.
 //
-// Le TOTAL T.T.C n'est plus calcule en taxant le sous-total HT global une
-// seule fois (ce qui pouvait laisser un 4e chiffre invisible, ex. 16 HT ->
-// 19,2304 par piece avant meme d'etre multiplie) : chaque ligne calcule son
-// propre prix unitaire TTC, arrondi au millime le plus proche, PUIS multiplie
-// par la quantite — comme demande, pour que "300 x 16 HT" retombe sur un
-// TOTAL T.T.C de 5 769,000 (et non 5 769,120, qui gardait un residu de
-// 0,0004 DT par piece non representable en dinars). Le sous-total HT et le
-// FODEC restent calcules normalement ; la T.V.A affichee est deduite du TTC
-// reellement facture (TTC - HT - FODEC) pour que les trois lignes du
-// recapitulatif se recoupent exactement avec le TOTAL T.T.C imprime.
-function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
+// IMPORTANT (revu le 4/10/2026, suite a une erreur) : le FODEC et la T.V.A
+// sont appliques UNE SEULE FOIS sur le sous-total HT de la facture entiere,
+// jamais ligne par ligne ni en arrondissant un prix unitaire TTC avant de le
+// multiplier par la quantite — un essai precedent dans ce sens (arrondir
+// 16 HT -> 19,2304 -> 19,230 par piece, puis x300) avait fausse le TOTAL
+// T.T.C de plusieurs millimes a chaque facture (ex. 1 730,800 au lieu du
+// 1 730,736 mathematiquement exact pour 100x6,4 + 200x4 HT) : arrondir avant
+// de multiplier par une grande quantite amplifie l'erreur et peut donner un
+// TTC incorrect sur un document fiscal. On arrondit donc seulement le
+// resultat FINAL de chaque total (ht/fodec/tva/ttc) au millime le plus
+// proche (1-4 vers le bas, 5-9 vers le haut), jamais les valeurs
+// intermediaires — c'est la seule methode exacte au millime pres.
+//
+// `prixImposesTtc` (case "Prix TTC imposes (appel d'offres)" de la facture) :
+// certains appels d'offres imposent un prix unitaire TTC deja arrondi au
+// millime (leur propre formulaire ne prend pas de 4e decimale) — facturer
+// au P.U.HT catalogue "propre" et taxer normalement donne alors un TOTAL
+// T.T.C legerement different du prix engage dans l'appel d'offres (l'ecart
+// vient de l'arrondi fait par l'appel d'offres lui-meme, pas d'une erreur
+// de calcul). Quand cette case est cochee, le champ prix de chaque ligne est
+// interprete comme ce P.U.TTC impose (au lieu du P.U.HT habituel) : on
+// retrouve le P.U.HT implique (prix TTC / ((1+FODEC) x 1,19), SANS l'arrondir)
+// pour l'inclure dans le sous-total HT, qui est ensuite taxe UNE SEULE FOIS
+// comme ci-dessus. Par construction algebrique, Qte x P.U.TTC impose retombe
+// alors exactement sur la part de TOTAL T.T.C de cette ligne, au millime
+// pres — donc la facture correspond exactement au prix engage dans l'appel
+// d'offres, quelle que soit la quantite.
+function calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc) {
   const tauxFodec = avecFodec ? 0.01 : 0;
-  let ht = 0;
-  let ttc = 0;
-  for (const l of lignes) {
-    const qte = Number(l.quantite) || 0;
-    const puHt = arrondirMillime(l.prixUnitaire);
-    const puTtc = arrondirMillime(puHt * (1 + tauxFodec) * 1.19);
-    ht += qte * puHt;
-    ttc += qte * puTtc;
+  let ht;
+  if (prixImposesTtc) {
+    const diviseurTtc = (1 + tauxFodec) * 1.19;
+    ht = lignes.reduce(
+      (s, l) => s + (Number(l.quantite) || 0) * (arrondirMillime(l.prixUnitaire) / diviseurTtc),
+      0
+    );
+  } else {
+    // Le prix unitaire de chaque ligne est arrondi au millime avant d'etre
+    // multiplie par la quantite (meme arrondi que celui imprime en P.U.HT,
+    // voir lignesHtml plus bas) : simple coherence d'affichage, ca ne change
+    // rien au calcul de la T.V.A/FODEC, qui restent appliques une seule fois
+    // sur ce sous-total HT.
+    ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * arrondirMillime(l.prixUnitaire), 0);
   }
   const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = ttc - ht - fodec;
+  const tva = (ht + fodec) * 0.19;
+  const ttc = ht + fodec + tva;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   const totalGeneral = ttc + timbreApplique;
   return {
@@ -95,9 +119,11 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
  *   change ; aucune couleur n'intervient dans la difference, tout reste
  *   imprimable a l'encre noire). Le QR code (§ ci-dessous) n'est affiche
  *   que sur le gabarit "classic".
- * @param {object} invoice  { numero, date, client, bonCommande, bonLivraison, lignes, avecFodec, avecTimbre, timbre }
+ * @param {object} invoice  { numero, date, client, bonCommande, bonLivraison, lignes, avecFodec, avecTimbre, timbre, prixImposesTtc }
  *   `client` est soit une chaine (anciennes factures), soit un instantane
  *   { id, nom, code, adresse } venant du catalogue clients.
+ *   `prixImposesTtc` : case "Prix TTC imposes (appel d'offres)" — voir le
+ *   commentaire JSDoc de calculerTotaux ci-dessus pour le detail.
  */
 function renderInvoiceHtml(company = {}, invoice = {}) {
   // Deux gabarits au choix par entreprise (voir le commentaire JSDoc
@@ -119,11 +145,13 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
   const lignes = invoice.lignes || [];
   const avecFodec = invoice.avecFodec !== false;
   const avecTimbre = !!invoice.avecTimbre;
+  const prixImposesTtc = !!invoice.prixImposesTtc;
   const { ht, fodec, tva, ttc, timbre, totalGeneral } = calculerTotaux(
     lignes,
     avecFodec,
     avecTimbre,
-    invoice.timbre
+    invoice.timbre,
+    prixImposesTtc
   );
   const montantLettres = montantEnLettresDT(totalGeneral);
 
@@ -456,7 +484,7 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
         <th class="code" style="width:12%">Code</th>
         <th>Designation</th>
         <th class="num" style="width:10%">Qte</th>
-        <th class="num" style="width:17%">P.U.HT</th>
+        <th class="num" style="width:17%">${prixImposesTtc ? "P.U.TTC" : "P.U.HT"}</th>
         <th class="num" style="width:17%">Total</th>
       </tr>
     </thead>

@@ -424,7 +424,13 @@ ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
   const filePath = invoiceFilePath(company, invoice.numero);
   await writePdfToFile(html, filePath);
 
-  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false, !!invoice.avecTimbre, invoice.timbre);
+  const totaux = calculerTotaux(
+    invoice.lignes || [],
+    invoice.avecFodec !== false,
+    !!invoice.avecTimbre,
+    invoice.timbre,
+    !!invoice.prixImposesTtc
+  );
   const record = addInvoice({
     companyId: company.id,
     numero: invoice.numero,
@@ -435,6 +441,7 @@ ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
     avecFodec: invoice.avecFodec,
     avecTimbre: invoice.avecTimbre,
     timbre: invoice.timbre,
+    prixImposesTtc: invoice.prixImposesTtc,
     lignes: invoice.lignes,
     totaux,
     company,
@@ -472,7 +479,13 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
     }
   }
 
-  const totaux = calculerTotaux(invoice.lignes || [], invoice.avecFodec !== false, !!invoice.avecTimbre, invoice.timbre);
+  const totaux = calculerTotaux(
+    invoice.lignes || [],
+    invoice.avecFodec !== false,
+    !!invoice.avecTimbre,
+    invoice.timbre,
+    !!invoice.prixImposesTtc
+  );
   const record = updateInvoice(id, {
     companyId: company.id,
     numero: invoice.numero,
@@ -483,6 +496,7 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
     avecFodec: invoice.avecFodec,
     avecTimbre: invoice.avecTimbre,
     timbre: invoice.timbre,
+    prixImposesTtc: invoice.prixImposesTtc,
     lignes: invoice.lignes,
     totaux,
     company,

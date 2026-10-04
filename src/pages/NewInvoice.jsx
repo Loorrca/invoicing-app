@@ -35,27 +35,44 @@ function round(n) {
 // le timbre fiscal, saisi a la main et optionnel, s'ajoute au TTC sans etre
 // soumis a la T.V.A ni au FODEC.
 //
-// Le TOTAL T.T.C n'est plus calcule en taxant le sous-total HT global une
-// seule fois : chaque ligne calcule son propre prix unitaire TTC, arrondi au
-// millime le plus proche, PUIS multiplie par la quantite — pour que "300 x 16
-// HT" retombe sur un TOTAL T.T.C de 5 769,000 (et non 5 769,120, qui gardait
-// un residu de 0,0004 DT par piece non representable en dinars). Le
-// sous-total HT et le FODEC restent calcules normalement ; la T.V.A affichee
-// est deduite du TTC reellement facture (TTC - HT - FODEC) pour que les
-// trois lignes du recapitulatif se recoupent exactement avec le TOTAL T.T.C.
-function calculerTotaux(lignes, avecFodec, avecTimbre, timbre) {
+// IMPORTANT (revu le 4/10/2026, suite a une erreur) : le FODEC et la T.V.A
+// sont appliques UNE SEULE FOIS sur le sous-total HT de la facture entiere,
+// jamais ligne par ligne ni en arrondissant un prix unitaire TTC avant de le
+// multiplier par la quantite — un essai precedent dans ce sens avait fausse
+// le TOTAL T.T.C de plusieurs millimes a chaque facture (ex. 1 730,800 au
+// lieu du 1 730,736 mathematiquement exact pour 100x6,4 + 200x4 HT) :
+// arrondir avant de multiplier par une grande quantite amplifie l'erreur et
+// peut donner un TTC incorrect sur un document fiscal. On arrondit donc
+// seulement le resultat FINAL de chaque total (ht/fodec/tva/ttc) au millime
+// le plus proche, jamais les valeurs intermediaires — c'est la seule
+// methode exacte au millime pres. Seul le prix unitaire HT lui-meme est
+// arrondi avant d'etre multiplie par la quantite (meme arrondi que celui
+// imprime en P.U.HT) : simple coherence d'affichage, ca ne change rien au
+// calcul de la T.V.A/FODEC.
+//
+// `prixImposesTtc` (case "Prix TTC imposes (appel d'offres)") : certains
+// appels d'offres imposent un P.U.TTC deja arrondi au millime par leur
+// propre formulaire — facturer au P.U.HT catalogue "propre" et taxer
+// normalement donnerait alors un TOTAL T.T.C legerement different du prix
+// engage dans l'appel d'offres. Quand la case est cochee, le champ prix de
+// chaque ligne est interprete comme ce P.U.TTC impose au lieu du P.U.HT
+// habituel : on retrouve le P.U.HT implique (sans l'arrondir) pour
+// l'inclure dans le sous-total HT, qui est ensuite taxe une seule fois
+// comme ci-dessus — par construction algebrique, Qte x P.U.TTC impose
+// retombe alors exactement sur la part de TOTAL T.T.C de cette ligne. Meme
+// formule que electron/lib/invoiceTemplate.js.
+function calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc) {
   const tauxFodec = avecFodec ? 0.01 : 0;
-  let ht = 0;
-  let ttc = 0;
-  for (const l of lignes) {
-    const qte = Number(l.quantite) || 0;
-    const puHt = round(l.prixUnitaire);
-    const puTtc = round(puHt * (1 + tauxFodec) * 1.19);
-    ht += qte * puHt;
-    ttc += qte * puTtc;
+  let ht;
+  if (prixImposesTtc) {
+    const diviseurTtc = (1 + tauxFodec) * 1.19;
+    ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * (round(l.prixUnitaire) / diviseurTtc), 0);
+  } else {
+    ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * round(l.prixUnitaire), 0);
   }
   const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = ttc - ht - fodec;
+  const tva = (ht + fodec) * 0.19;
+  const ttc = ht + fodec + tva;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   return {
     ht: round(ht),
@@ -79,6 +96,9 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
   const [avecFodec, setAvecFodec] = useState(true);
   const [avecTimbre, setAvecTimbre] = useState(false);
   const [timbre, setTimbre] = useState("");
+  // Appel d'offres qui impose un P.U.TTC deja arrondi au millime : voir le
+  // commentaire JSDoc de calculerTotaux ci-dessus.
+  const [prixImposesTtc, setPrixImposesTtc] = useState(false);
   const [lignes, setLignes] = useState([emptyLigne()]);
   const [status, setStatus] = useState(null);
   const [generating, setGenerating] = useState(false);
@@ -131,6 +151,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
           setAvecFodec(record.avecFodec !== false);
           setAvecTimbre(!!record.avecTimbre);
           setTimbre(record.timbre ?? "");
+          setPrixImposesTtc(!!record.prixImposesTtc);
           setLignes(
             record.lignes && record.lignes.length
               ? record.lignes.map((l) => ({ code: l.code || "", ...l }))
@@ -169,8 +190,8 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
   }, [editingId]);
 
   const totaux = useMemo(
-    () => calculerTotaux(lignes, avecFodec, avecTimbre, timbre),
-    [lignes, avecFodec, avecTimbre, timbre]
+    () => calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc),
+    [lignes, avecFodec, avecTimbre, timbre, prixImposesTtc]
   );
 
   function updateLigne(i, field, value) {
@@ -293,7 +314,6 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
     if (!nom) return;
     const created = await window.api.addClient({
       nom,
-      code: newClientDraft.code.trim(),
       adresse: newClientDraft.adresse.trim(),
     });
     setClients((cs) => [...cs, created].sort((a, b) => a.nom.localeCompare(b.nom, "fr")));
@@ -330,6 +350,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
         avecFodec,
         avecTimbre,
         timbre: avecTimbre ? Number(timbre) || 0 : 0,
+        prixImposesTtc,
         lignes: lignes
           .filter((l) => l.designation.trim() || Number(l.quantite) || Number(l.prixUnitaire))
           .map((l) => ({
@@ -423,6 +444,14 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
             <input type="checkbox" checked={avecFodec} onChange={(e) => setAvecFodec(e.target.checked)} />
             Appliquer le FODEC (1%)
           </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={prixImposesTtc}
+              onChange={(e) => setPrixImposesTtc(e.target.checked)}
+            />
+            Prix TTC imposes
+          </label>
           <label>
             Bon de commande N&deg; (optionnel)
             <input type="text" value={bonCommande} onChange={(e) => setBonCommande(e.target.value)} />
@@ -486,7 +515,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
               <th style={{ width: "14%" }}>Code</th>
               <th>Designation</th>
               <th style={{ width: "10%" }}>Qte</th>
-              <th style={{ width: "14%" }}>P.U.HT (DT)</th>
+              <th style={{ width: "14%" }}>{prixImposesTtc ? "P.U.TTC (DT)" : "P.U.HT (DT)"}</th>
               <th style={{ width: "14%" }}>Total</th>
               <th style={{ width: "4%" }}></th>
             </tr>
@@ -539,6 +568,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
                     step="any"
                     value={l.prixUnitaire}
                     onChange={(e) => updateLigne(i, "prixUnitaire", e.target.value)}
+                    onFocus={(e) => e.target.select()}
                   />
                 </td>
                 <td className="num">{fmt((Number(l.quantite) || 0) * round(l.prixUnitaire))}</td>
@@ -614,14 +644,6 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
               />
             </label>
             <label>
-              Code client (optionnel)
-              <input
-                type="text"
-                value={newClientDraft.code}
-                onChange={(e) => setNewClientDraft((d) => ({ ...d, code: e.target.value }))}
-              />
-            </label>
-            <label>
               Adresse (optionnel)
               <input
                 type="text"
@@ -629,6 +651,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
                 onChange={(e) => setNewClientDraft((d) => ({ ...d, adresse: e.target.value }))}
               />
             </label>
+            <p className="field-hint">Le code client est attribue automatiquement (3 chiffres).</p>
             <div className="actions">
               <button type="submit" className="btn primary">Ajouter</button>
               <button type="button" className="btn secondary" onClick={() => setShowNewClient(false)}>

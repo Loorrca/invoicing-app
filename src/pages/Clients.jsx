@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { correspondTranslitteration, correspondSigle } from "../utils/translitteration.js";
+import { correspondTranslitteration } from "../utils/translitteration.js";
 
 function emptyDraft() {
   return { nom: "", code: "", adresse: "" };
@@ -36,10 +36,7 @@ export default function Clients() {
       (c.adresse || "").toLowerCase().includes(q) ||
       // Recherche translitteree : retrouve "بلدية التضامن" en tapant
       // "tadhamen"/"tadamen", "المستشفى ... سنان" en tapant "sinan", etc.
-      correspondTranslitteration(c.nom, query) ||
-      // Sigles a points : retrouve "O.N.P.F.T" en tapant "onpft".
-      correspondSigle(c.nom, query) ||
-      correspondSigle(c.code, query)
+      correspondTranslitteration(c.nom, query)
     );
   });
 
@@ -49,10 +46,11 @@ export default function Clients() {
     const nom = addDraft.nom.trim();
     if (!nom) return;
     try {
-      await window.api.addClient({ nom, code: addDraft.code.trim(), adresse: addDraft.adresse.trim() });
+      const created = await window.api.addClient({ nom, adresse: addDraft.adresse.trim() });
       setAddDraft(emptyDraft());
       setShowAdd(false);
       await refresh();
+      setStatus({ kind: "ok", text: `Client ajoute (code ${created.code}).` });
     } catch (err) {
       setStatus({ kind: "error", text: String(err?.message || err) });
     }
@@ -215,14 +213,6 @@ export default function Clients() {
               />
             </label>
             <label>
-              Code client (optionnel)
-              <input
-                type="text"
-                value={addDraft.code}
-                onChange={(e) => setAddDraft((d) => ({ ...d, code: e.target.value }))}
-              />
-            </label>
-            <label>
               Adresse (optionnel)
               <input
                 type="text"
@@ -230,6 +220,7 @@ export default function Clients() {
                 onChange={(e) => setAddDraft((d) => ({ ...d, adresse: e.target.value }))}
               />
             </label>
+            <p className="field-hint">Le code client est attribue automatiquement (3 chiffres).</p>
             <div className="actions">
               <button type="submit" className="btn primary">Ajouter</button>
               <button type="button" className="btn secondary" onClick={() => setShowAdd(false)}>

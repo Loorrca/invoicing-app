@@ -10,6 +10,17 @@ function fmtDate(d) {
   return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+// Date locale du jour au format "AAAA-MM-JJ", sans passer par toISOString()
+// (qui convertit en UTC et peut afficher la veille en debut de nuit dans un
+// fuseau horaire comme Africa/Tunis, UTC+1 — meme precaution que ymIndex()
+// dans Dashboard.jsx).
+function todayIso() {
+  const d = new Date();
+  const mois = String(d.getMonth() + 1).padStart(2, "0");
+  const jour = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mois}-${jour}`;
+}
+
 // Les quantites "produites" sont deduites des lignes des factures deja
 // enregistrees (pas de nouvelle saisie). Depuis que la designation de
 // chaque ligne de facture est librement modifiable (voir NewInvoice.jsx —
@@ -27,6 +38,11 @@ export default function Productions() {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [depuis, setDepuis] = useState("");
+  // "Jusqu'au" sert surtout a figer une periode comptable (ex. l'annee en
+  // cours) sans avoir a y repenser a chaque ouverture de l'onglet : on le
+  // pre-remplit avec la date du jour, mais il reste modifiable/effacable
+  // comme "Depuis le".
+  const [jusqua, setJusqua] = useState(todayIso());
 
   useEffect(() => {
     Promise.all([window.api.listInvoices(), window.api.listArticles()])
@@ -39,8 +55,14 @@ export default function Productions() {
   }, []);
 
   const filtered = useMemo(
-    () => (depuis ? invoices.filter((f) => (f.date || "") >= depuis) : invoices),
-    [invoices, depuis]
+    () =>
+      invoices.filter((f) => {
+        const date = f.date || "";
+        if (depuis && date < depuis) return false;
+        if (jusqua && date > jusqua) return false;
+        return true;
+      }),
+    [invoices, depuis, jusqua]
   );
 
   // Catalogue actuel indexe par code (en minuscules) : sert a retrouver le
@@ -95,14 +117,23 @@ export default function Productions() {
         enregistrees.
       </p>
 
-      <label className="productions-filter">
-        Depuis le
-        <input type="date" value={depuis} onChange={(e) => setDepuis(e.target.value)} />
-      </label>
+      <div className="invoices-filters">
+        <label className="productions-filter">
+          Depuis le
+          <input type="date" value={depuis} onChange={(e) => setDepuis(e.target.value)} />
+        </label>
+        <label className="productions-filter">
+          Jusqu'au
+          <input type="date" value={jusqua} onChange={(e) => setJusqua(e.target.value)} />
+        </label>
+      </div>
 
       <p className="subtitle">
         {filtered.length} facture{filtered.length > 1 ? "s" : ""} prise{filtered.length > 1 ? "s" : ""} en compte
-        {depuis ? ` depuis le ${fmtDate(depuis)}` : " (toutes les factures)"}.
+        {depuis || jusqua
+          ? ` (${depuis ? `du ${fmtDate(depuis)}` : "depuis le debut"} ${jusqua ? `au ${fmtDate(jusqua)}` : "sans limite"})`
+          : " (toutes les factures)"}
+        .
       </p>
 
       {totals.length === 0 ? (

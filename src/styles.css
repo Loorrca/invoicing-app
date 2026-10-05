@@ -343,6 +343,23 @@ table.lignes-editor input.qte-input {
 }
 .page-header-row .subtitle { margin-bottom: 0; }
 
+.dashboard-year-select { min-width: 110px; }
+
+.dashboard-year-select select {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.dashboard-year-select select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(47, 95, 224, 0.15);
+}
+
 .invoices-search-row {
   display: flex;
   align-items: center;
@@ -410,6 +427,41 @@ table.invoices-table th.num,
 table.invoices-table td.num { text-align: right; }
 
 .invoices-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+
+.invoices-year-group { margin-bottom: 14px; }
+
+.invoices-year-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.invoices-year-bar:hover { border-color: var(--accent); }
+
+.invoices-year-arrow {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.invoices-year-arrow.open { transform: rotate(90deg); }
+
+.invoices-year-label { font-weight: 700; font-size: 15px; }
+
+.invoices-year-count { color: var(--muted); font-size: 13px; }
+
+.invoices-year-total { margin-left: auto; font-weight: 600; }
+
+.invoices-year-group .table-scroll { margin-top: 8px; }
 
 .productions-filter {
   max-width: 220px;
@@ -637,14 +689,7 @@ table.invoices-table td.num { text-align: right; }
   border-radius: 999px;
 }
 
-/* "Payée" en bleu plutot qu'en vert : vert (Payée) et rouge (Non payée)
-   sont difficiles a distinguer pour une partie des gens (daltonisme
-   rouge-vert, le plus courant), alors que jaune (Probable) reste clair pour
-   tout le monde car il ne fait pas partie de cette paire de teintes. Le
-   bleu reprend --accent (deja utilise partout ailleurs dans l'appli) et
-   reste net face au rouge et au jaune, quelle que soit la vision des
-   couleurs. */
-.badge-payee { background: #dde7fb; color: var(--accent-hover); }
+.badge-payee { background: #e2efda; color: #1a7f37; }
 .badge-probable { background: #fff2cc; color: #8a6d00; }
 .badge-nonpayee { background: #fce4e4; color: var(--danger); }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { nomClient, codeClient } from "../utils/clientDisplay.js";
 
 function fmt(n) {
@@ -23,12 +23,35 @@ export default function InvoicesList({ onEdit }) {
   const [status, setStatus] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [printingId, setPrintingId] = useState(null);
+  // Annees "ouvertes" dans la liste groupee par annee (voir groups plus
+  // bas). Initialise une seule fois, au premier chargement, sur l'annee la
+  // plus recente qui a des factures (pas forcement l'annee civile en
+  // cours, ex. aucune facture encore saisie en janvier) — un refresh
+  // ulterieur (apres suppression, etc.) ne doit pas reinitialiser ce que
+  // l'utilisateur a deja ouvert/ferme a la main.
+  const [expandedYears, setExpandedYears] = useState(() => new Set());
+  const expansionInitRef = useRef(false);
 
   async function refresh() {
     setLoading(true);
     const list = await window.api.listInvoices();
     setInvoices(list);
+    if (!expansionInitRef.current) {
+      expansionInitRef.current = true;
+      const annees = list.map((f) => (f.date || "").slice(0, 4)).filter((a) => /^\d{4}$/.test(a));
+      const plusRecente = annees.length ? annees.sort().slice(-1)[0] : String(new Date().getFullYear());
+      setExpandedYears(new Set([plusRecente]));
+    }
     setLoading(false);
+  }
+
+  function toggleYear(year) {
+    setExpandedYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(year)) next.delete(year);
+      else next.add(year);
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -63,6 +86,31 @@ export default function InvoicesList({ onEdit }) {
       return true;
     });
   }, [invoices, query, filters]);
+
+  // Regroupe les factures (deja filtrees) par annee de la facture, du plus
+  // recent au plus ancien, pour l'affichage en barres pliables/depliables —
+  // la recherche et les filtres restent actifs a l'interieur de chaque
+  // annee ; une annee sans aucune facture correspondante n'apparait tout
+  // simplement pas.
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const f of filtered) {
+      const year = /^\d{4}$/.test((f.date || "").slice(0, 4)) ? f.date.slice(0, 4) : "Sans date";
+      if (!map.has(year)) map.set(year, []);
+      map.get(year).push(f);
+    }
+    return [...map.entries()]
+      .sort((a, b) => {
+        if (a[0] === "Sans date") return 1;
+        if (b[0] === "Sans date") return -1;
+        return b[0].localeCompare(a[0]);
+      })
+      .map(([year, rows]) => ({
+        year,
+        rows,
+        totalTtc: rows.reduce((s, f) => s + (f.totaux?.ttc || 0), 0),
+      }));
+  }, [filtered]);
 
   async function handleOpenPdf(id) {
     setStatus(null);
@@ -180,64 +228,91 @@ export default function InvoicesList({ onEdit }) {
             : "Aucune facture pour le moment."}
         </p>
       ) : (
-        <div className="table-scroll">
-          <table className="invoices-table">
-            <thead>
-              <tr>
-                <th>N&deg;</th>
-                <th>Date</th>
-                <th>Client</th>
-                <th className="num">Total T.T.C</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((f) => (
-                <tr key={f.id}>
-                  <td>{f.numero}</td>
-                  <td>{formatDate(f.date)}</td>
-                  <td>{nomClient(f.client)}</td>
-                  <td className="num">{fmt(f.totaux?.ttc)} DT</td>
-                  <td className="invoices-actions">
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() => handlePrint(f.id)}
-                      disabled={printingId === f.id}
-                    >
-                      {printingId === f.id ? "Impression..." : "Imprimer"}
-                    </button>
-                    <button type="button" className="btn secondary" onClick={() => handleOpenPdf(f.id)}>
-                      Revoir le PDF
-                    </button>
-                    <button type="button" className="btn secondary" onClick={() => onEdit?.(f.id)}>
-                      Modifier
-                    </button>
-                    {confirmDeleteId === f.id ? (
-                      <>
-                        <button type="button" className="btn link" onClick={() => handleDelete(f.id)}>
-                          Confirmer
-                        </button>
-                        <button type="button" className="btn secondary" onClick={() => setConfirmDeleteId(null)}>
-                          Annuler
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn icon"
-                        onClick={() => setConfirmDeleteId(f.id)}
-                        aria-label="Supprimer cette facture"
-                      >
-                        &times;
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        groups.map((g) => {
+          const isOpen = expandedYears.has(g.year);
+          return (
+            <div key={g.year} className="invoices-year-group">
+              <button
+                type="button"
+                className="invoices-year-bar"
+                onClick={() => toggleYear(g.year)}
+                aria-expanded={isOpen}
+              >
+                <span className={`invoices-year-arrow ${isOpen ? "open" : ""}`}>&#9656;</span>
+                <span className="invoices-year-label">{g.year}</span>
+                <span className="invoices-year-count">
+                  {g.rows.length} facture{g.rows.length > 1 ? "s" : ""}
+                </span>
+                <span className="invoices-year-total">{fmt(g.totalTtc)} DT</span>
+              </button>
+
+              {isOpen && (
+                <div className="table-scroll">
+                  <table className="invoices-table">
+                    <thead>
+                      <tr>
+                        <th>N&deg;</th>
+                        <th>Date</th>
+                        <th>Client</th>
+                        <th className="num">Total T.T.C</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.rows.map((f) => (
+                        <tr key={f.id}>
+                          <td>{f.numero}</td>
+                          <td>{formatDate(f.date)}</td>
+                          <td>{nomClient(f.client)}</td>
+                          <td className="num">{fmt(f.totaux?.ttc)} DT</td>
+                          <td className="invoices-actions">
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => handlePrint(f.id)}
+                              disabled={printingId === f.id}
+                            >
+                              {printingId === f.id ? "Impression..." : "Imprimer"}
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => handleOpenPdf(f.id)}>
+                              Revoir le PDF
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => onEdit?.(f.id)}>
+                              Modifier
+                            </button>
+                            {confirmDeleteId === f.id ? (
+                              <>
+                                <button type="button" className="btn link" onClick={() => handleDelete(f.id)}>
+                                  Confirmer
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn secondary"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                >
+                                  Annuler
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn icon"
+                                onClick={() => setConfirmDeleteId(f.id)}
+                                aria-label="Supprimer cette facture"
+                              >
+                                &times;
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );

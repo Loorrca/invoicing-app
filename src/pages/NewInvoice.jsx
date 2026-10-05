@@ -3,6 +3,7 @@ import Calculatrice from "../components/Calculatrice.jsx";
 import ArticlesManager from "../components/ArticlesManager.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
 import FilterSuggestInput from "../components/FilterSuggestInput.jsx";
+import { TAUX_TVA, TAUX_FODEC } from "../utils/taxRates.js";
 
 const NOUVEL_ARTICLE = "__new_article__";
 const NOUVEAU_CLIENT = "__new_client__";
@@ -62,16 +63,16 @@ function round(n) {
 // retombe alors exactement sur la part de TOTAL T.T.C de cette ligne. Meme
 // formule que electron/lib/invoiceTemplate.js.
 function calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc) {
-  const tauxFodec = avecFodec ? 0.01 : 0;
+  const tauxFodec = avecFodec ? TAUX_FODEC : 0;
   let ht;
   if (prixImposesTtc) {
-    const diviseurTtc = (1 + tauxFodec) * 1.19;
+    const diviseurTtc = (1 + tauxFodec) * (1 + TAUX_TVA);
     ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * (round(l.prixUnitaire) / diviseurTtc), 0);
   } else {
     ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * round(l.prixUnitaire), 0);
   }
-  const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
+  const fodec = avecFodec ? ht * TAUX_FODEC : 0;
+  const tva = (ht + fodec) * TAUX_TVA;
   const ttc = ht + fodec + tva;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   return {
@@ -442,7 +443,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
           </div>
           <label className="checkbox-row">
             <input type="checkbox" checked={avecFodec} onChange={(e) => setAvecFodec(e.target.checked)} />
-            Appliquer le FODEC (1%)
+            Appliquer le FODEC ({TAUX_FODEC * 100}%)
           </label>
           <label className="checkbox-row">
             <input
@@ -585,8 +586,8 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
 
         <div className="totaux-preview">
           <div><span>P.T.H.T</span><span>{fmt(totaux.ht)} DT</span></div>
-          {avecFodec && <div><span>FODEC 1%</span><span>{fmt(totaux.fodec)} DT</span></div>}
-          <div><span>T.V.A 19%</span><span>{fmt(totaux.tva)} DT</span></div>
+          {avecFodec && <div><span>FODEC {TAUX_FODEC * 100}%</span><span>{fmt(totaux.fodec)} DT</span></div>}
+          <div><span>T.V.A {TAUX_TVA * 100}%</span><span>{fmt(totaux.tva)} DT</span></div>
           <div className={avecTimbre && totaux.timbre > 0 ? "" : "ttc"}>
             <span>TOTAL T.T.C</span><span>{fmt(totaux.ttc)} DT</span>
           </div>

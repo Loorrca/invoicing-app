@@ -206,6 +206,25 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
   const [backupInfo, setBackupInfo] = useState(null);
   const [backupExporting, setBackupExporting] = useState(false);
   const [backupMsg, setBackupMsg] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+
+  // Annees proposees dans le selecteur : celles qui ont au moins une
+  // facture, plus l'annee civile en cours (meme vide, ex. le 1er janvier,
+  // pour qu'on puisse quand meme la voir/la selectionner).
+  const availableYears = useMemo(() => {
+    const years = new Set(
+      invoices
+        .map((f) => Number((f.date || "").slice(0, 4)))
+        .filter((y) => Number.isFinite(y) && y > 0)
+    );
+    years.add(new Date().getFullYear());
+    return [...years].sort((a, b) => b - a);
+  }, [invoices]);
+
+  const yearInvoices = useMemo(
+    () => invoices.filter((f) => Number((f.date || "").slice(0, 4)) === selectedYear),
+    [invoices, selectedYear]
+  );
 
   useEffect(() => {
     window.api
@@ -246,16 +265,19 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
 
   const stats = useMemo(() => {
     const monthTotals = new Map();
-    let earliestIdx = null;
+    const monthTotalsTva = new Map();
+    const monthTotalsTtc = new Map();
     let totalHT = 0;
     let totalTTC = 0;
     let totalTVA = 0;
-    const monthTotalsTva = new Map();
-    const monthTotalsTtc = new Map();
     const clientTotals = new Map();
     const productTotals = new Map();
 
-    for (const f of invoices) {
+    // Tout ce qui suit est scope a l'annee choisie dans le selecteur
+    // (yearInvoices), pas a l'historique complet : CA/TVA de l'annee,
+    // graphique mensuel de janvier a decembre de cette annee-la, top
+    // clients/articles de cette annee-la.
+    for (const f of yearInvoices) {
       const ht = f.totaux?.ht || 0;
       const tva = f.totaux?.tva || 0;
       const ttc = f.totaux?.ttc || 0;
@@ -268,7 +290,6 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
         monthTotals.set(idx, (monthTotals.get(idx) || 0) + ht);
         monthTotalsTva.set(idx, (monthTotalsTva.get(idx) || 0) + tva);
         monthTotalsTtc.set(idx, (monthTotalsTtc.get(idx) || 0) + ttc);
-        if (earliestIdx === null || idx < earliestIdx) earliestIdx = idx;
       }
 
       const client = nomClient(f.client).trim();
@@ -281,14 +302,13 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       }
     }
 
-    const now = new Date();
-    const nowIdx = now.getFullYear() * 12 + now.getMonth();
-    const twelveAgoIdx = nowIdx - 11;
-    const startIdx = earliestIdx !== null && earliestIdx > twelveAgoIdx ? earliestIdx : twelveAgoIdx;
-
+    // Les 12 mois de l'annee choisie, janvier a decembre, toujours complets
+    // (barres a zero pour un mois sans facture) : colle au calendrier de
+    // l'annee selectionnee plutot qu'a une fenetre glissante de 12 mois.
+    const yearStartIdx = selectedYear * 12;
     const months = [];
     const moisTva = [];
-    for (let idx = startIdx; idx <= nowIdx; idx++) {
+    for (let idx = yearStartIdx; idx < yearStartIdx + 12; idx++) {
       months.push({ label: ymLabel(idx), value: monthTotals.get(idx) || 0 });
       moisTva.push({
         idx,
@@ -299,10 +319,34 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       });
     }
 
-    const thisMonthHT = monthTotals.get(nowIdx) || 0;
-    const prevMonthHT = monthTotals.get(nowIdx - 1) || 0;
-    const delta = prevMonthHT > 0 ? ((thisMonthHT - prevMonthHT) / prevMonthHT) * 100 : null;
-    const thisMonthTVA = monthTotalsTva.get(nowIdx) || 0;
+    // "Ce mois-ci" / "mois precedent" n'ont de sens que pour l'annee civile
+    // en cours. On les recalcule a partir de TOUTES les factures (pas
+    // seulement yearInvoices) pour que janvier compare correctement au
+    // decembre de l'annee precedente, sans faux zero du a la coupure
+    // d'annee.
+    const now = new Date();
+    const nowIdx = now.getFullYear() * 12 + now.getMonth();
+    const estAnneeEnCours = selectedYear === now.getFullYear();
+
+    let thisMonthHT = null;
+    let prevMonthHT = null;
+    let thisMonthTVA = null;
+    let delta = null;
+    if (estAnneeEnCours) {
+      thisMonthHT = 0;
+      prevMonthHT = 0;
+      thisMonthTVA = 0;
+      for (const f of invoices) {
+        const idx = ymIndex(f.date);
+        if (idx === nowIdx) {
+          thisMonthHT += f.totaux?.ht || 0;
+          thisMonthTVA += f.totaux?.tva || 0;
+        } else if (idx === nowIdx - 1) {
+          prevMonthHT += f.totaux?.ht || 0;
+        }
+      }
+      delta = prevMonthHT > 0 ? ((thisMonthHT - prevMonthHT) / prevMonthHT) * 100 : null;
+    }
 
     const topClients = [...clientTotals.entries()]
       .map(([label, value]) => ({ label, value }))
@@ -326,8 +370,32 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       delta,
       topClients,
       topProducts,
+      estAnneeEnCours,
     };
-  }, [invoices]);
+  }, [invoices, yearInvoices, selectedYear]);
+
+  // "Suivi des paiements" du tableau de bord, scope a l'annee choisie : on
+  // reutilise les lignes deja rapprochees par scanPayments() (meme appel,
+  // non filtre) et on ne refait que la somme, sur les factures EMISES
+  // cette annee-la (base facturation : une facture de decembre payee en
+  // janvier compte dans l'annee de la facture, pas celle de l'encaissement
+  // — coherent avec "Reste a encaisser", qui n'a de date que celle de la
+  // facture). L'onglet Paiements, lui, reste cumulatif et n'a pas ce
+  // filtre.
+  const paiementsAnnee = useMemo(() => {
+    if (!paiements) return null;
+    const rows = paiements.rows.filter((r) => Number((r.date || "").slice(0, 4)) === selectedYear);
+    const totalEncaisse = rows.reduce((s, r) => s + (typeof r.montantRecu === "number" ? r.montantRecu : 0), 0);
+    const resteAEncaisser = rows
+      .filter((r) => r.statut === "Non payée")
+      .reduce((s, r) => s + (r.montantTtc || 0), 0);
+    const nbAVerifier = rows.filter((r) => r.peutVerifier).length;
+    return {
+      totalEncaisse: Math.round(totalEncaisse * 1000) / 1000,
+      resteAEncaisser: Math.round(resteAEncaisser * 1000) / 1000,
+      nbAVerifier,
+    };
+  }, [paiements, selectedYear]);
 
   if (loading) return <div className="page">Chargement...</div>;
 
@@ -347,125 +415,151 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
     );
   }
 
-  const recent = invoices.slice(0, 6);
+  const recent = yearInvoices.slice(0, 6);
 
   return (
     <div className="page page-wide">
-      <h1>Tableau de bord</h1>
-      <p className="subtitle">Vue d'ensemble de l'entreprise active.</p>
-
-      <div className="kpi-row">
-        <StatTile
-          label="Chiffre d'affaires total (HT)"
-          value={fmtMoney(stats.totalHT)}
-          subValue={`TTC : ${fmtMoney(stats.totalTTC)}`}
-        />
-        <StatTile label="Ce mois-ci (HT)" value={fmtMoney(stats.thisMonthHT)} delta={stats.delta} />
-        <StatTile label="Mois precedent (HT)" value={fmtMoney(stats.prevMonthHT)} />
-      </div>
-
-      <div className="card">
-        <h2 className="section-title">Evolution du chiffre d'affaires (HT)</h2>
-        <EvolutionChart months={stats.months} />
-      </div>
-
-      <div className="card">
-        <h2 className="section-title">TVA collectée</h2>
-        <div className="kpi-row" style={{ marginBottom: 14 }}>
-          <StatTile label="TVA collectée (total)" value={fmtMoney(stats.totalTVA)} />
-          <StatTile label="TVA collectée (ce mois-ci)" value={fmtMoney(stats.thisMonthTVA)} />
+      <div className="page-header-row">
+        <div>
+          <h1>Tableau de bord</h1>
+          <p className="subtitle">Vue d'ensemble de l'entreprise active.</p>
         </div>
-        <div className="table-scroll">
-          <table className="invoices-table">
-            <thead>
-              <tr>
-                <th>Mois</th>
-                <th className="num">Chiffre d'affaires HT</th>
-                <th className="num">TVA collectée</th>
-                <th className="num">Total TTC</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...stats.moisTva].reverse().map((m) => (
-                <tr key={m.idx}>
-                  <td>{m.label}</td>
-                  <td className="num">{fmtMoney(m.ht)}</td>
-                  <td className="num">{fmtMoney(m.tva)}</td>
-                  <td className="num">{fmtMoney(m.ttc)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="payments-folder-hint">
-          Pense-bête pour la déclaration mensuelle de TVA : la TVA collectée sur les factures émises ce
-          mois-ci, avant déduction de la TVA payée sur vos propres achats.
-        </p>
-      </div>
-
-      {paiements && (
-        <div className="card">
-          <div className="dashboard-card-header">
-            <h2 className="section-title">Suivi des paiements (rapprochement BIAT)</h2>
-            <button type="button" className="btn secondary" onClick={() => onGoToPaiements?.()}>
-              Voir les paiements
-            </button>
-          </div>
-          <div className="kpi-row" style={{ marginBottom: 0 }}>
-            <StatTile label="Total encaissé" value={fmtMoney(paiements.recap.totalEncaisse)} />
-            <StatTile label="Reste à encaisser" value={fmtMoney(paiements.recap.resteAEncaisser)} />
-            <StatTile label="Factures à vérifier" value={fmtQty(paiements.recap.nbAVerifier)} />
-          </div>
-        </div>
-      )}
-
-      <div className="grid-2 dashboard-grid">
-        <div className="card">
-          <h2 className="section-title">Top clients (HT)</h2>
-          {stats.topClients.length ? (
-            <HorizontalBars data={stats.topClients} formatValue={fmtMoney} />
-          ) : (
-            <p className="subtitle">Aucune donnee.</p>
-          )}
-        </div>
-        <div className="card">
-          <h2 className="section-title">Top 5 articles (quantite)</h2>
-          {stats.topProducts.length ? (
-            <HorizontalBars data={stats.topProducts} formatValue={fmtQty} />
-          ) : (
-            <p className="subtitle">Aucune donnee.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="dashboard-card-header">
-          <h2 className="section-title">Dernieres factures</h2>
-          <button type="button" className="btn secondary" onClick={() => onGoToInvoices?.()}>
-            Voir toutes les factures
-          </button>
-        </div>
-        <table className="invoices-table">
-          <thead>
-            <tr>
-              <th>N&deg;</th>
-              <th>Date</th>
-              <th>Client</th>
-              <th className="num">Total T.T.C</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map((f) => (
-              <tr key={f.id}>
-                <td>{f.numero}</td>
-                <td>{fmtDate(f.date)}</td>
-                <td>{nomClient(f.client)}</td>
-                <td className="num">{fmtMoney(f.totaux?.ttc)}</td>
-              </tr>
+        <label className="dashboard-year-select">
+          Année
+          <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
             ))}
-          </tbody>
-        </table>
+          </select>
+        </label>
       </div>
+
+      {yearInvoices.length === 0 ? (
+        <p className="subtitle">Aucune facture pour l'année {selectedYear}.</p>
+      ) : (
+        <>
+          <div className="kpi-row">
+            <StatTile
+              label={`Chiffre d'affaires ${selectedYear} (HT)`}
+              value={fmtMoney(stats.totalHT)}
+              subValue={`TTC : ${fmtMoney(stats.totalTTC)}`}
+            />
+            {stats.estAnneeEnCours && (
+              <>
+                <StatTile label="Ce mois-ci (HT)" value={fmtMoney(stats.thisMonthHT)} delta={stats.delta} />
+                <StatTile label="Mois precedent (HT)" value={fmtMoney(stats.prevMonthHT)} />
+              </>
+            )}
+          </div>
+
+          <div className="card">
+            <h2 className="section-title">Evolution du chiffre d'affaires (HT) — {selectedYear}</h2>
+            <EvolutionChart months={stats.months} />
+          </div>
+
+          <div className="card">
+            <h2 className="section-title">TVA collectée — {selectedYear}</h2>
+            <div className="kpi-row" style={{ marginBottom: 14 }}>
+              <StatTile label={`TVA collectée ${selectedYear}`} value={fmtMoney(stats.totalTVA)} />
+              {stats.estAnneeEnCours && (
+                <StatTile label="TVA collectée (ce mois-ci)" value={fmtMoney(stats.thisMonthTVA)} />
+              )}
+            </div>
+            <div className="table-scroll">
+              <table className="invoices-table">
+                <thead>
+                  <tr>
+                    <th>Mois</th>
+                    <th className="num">Chiffre d'affaires HT</th>
+                    <th className="num">TVA collectée</th>
+                    <th className="num">Total TTC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...stats.moisTva].reverse().map((m) => (
+                    <tr key={m.idx}>
+                      <td>{m.label}</td>
+                      <td className="num">{fmtMoney(m.ht)}</td>
+                      <td className="num">{fmtMoney(m.tva)}</td>
+                      <td className="num">{fmtMoney(m.ttc)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="payments-folder-hint">
+              Pense-bête pour la déclaration mensuelle de TVA : la TVA collectée sur les factures émises ce
+              mois-ci, avant déduction de la TVA payée sur vos propres achats.
+            </p>
+          </div>
+
+          {paiementsAnnee && (
+            <div className="card">
+              <div className="dashboard-card-header">
+                <h2 className="section-title">Suivi des paiements (rapprochement BIAT) — {selectedYear}</h2>
+                <button type="button" className="btn secondary" onClick={() => onGoToPaiements?.()}>
+                  Voir les paiements
+                </button>
+              </div>
+              <div className="kpi-row" style={{ marginBottom: 0 }}>
+                <StatTile label="Total encaissé" value={fmtMoney(paiementsAnnee.totalEncaisse)} />
+                <StatTile label="Reste à encaisser" value={fmtMoney(paiementsAnnee.resteAEncaisser)} />
+                <StatTile label="Factures à vérifier" value={fmtQty(paiementsAnnee.nbAVerifier)} />
+              </div>
+            </div>
+          )}
+
+          <div className="grid-2 dashboard-grid">
+            <div className="card">
+              <h2 className="section-title">Top clients (HT) — {selectedYear}</h2>
+              {stats.topClients.length ? (
+                <HorizontalBars data={stats.topClients} formatValue={fmtMoney} />
+              ) : (
+                <p className="subtitle">Aucune donnee.</p>
+              )}
+            </div>
+            <div className="card">
+              <h2 className="section-title">Top 5 articles (quantite) — {selectedYear}</h2>
+              {stats.topProducts.length ? (
+                <HorizontalBars data={stats.topProducts} formatValue={fmtQty} />
+              ) : (
+                <p className="subtitle">Aucune donnee.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="dashboard-card-header">
+              <h2 className="section-title">Dernieres factures ({selectedYear})</h2>
+              <button type="button" className="btn secondary" onClick={() => onGoToInvoices?.()}>
+                Voir toutes les factures
+              </button>
+            </div>
+            <table className="invoices-table">
+              <thead>
+                <tr>
+                  <th>N&deg;</th>
+                  <th>Date</th>
+                  <th>Client</th>
+                  <th className="num">Total T.T.C</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((f) => (
+                  <tr key={f.id}>
+                    <td>{f.numero}</td>
+                    <td>{fmtDate(f.date)}</td>
+                    <td>{nomClient(f.client)}</td>
+                    <td className="num">{fmtMoney(f.totaux?.ttc)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <BackupReminderCard
         backupInfo={backupInfo}

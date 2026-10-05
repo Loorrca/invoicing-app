@@ -2,6 +2,7 @@
 
 const { montantEnLettresDT } = require("./numberToWords");
 const { nomClient, codeClient, adresseClient } = require("./clientDisplay");
+const { TAUX_TVA, TAUX_FODEC } = require("./taxRates");
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({
@@ -23,7 +24,7 @@ function formatMontant(n) {
 
 // Le dinar tunisien n'a pas de sous-unite en dessous du millime (3 decimales) :
 // un prix unitaire ne doit donc jamais afficher ou utiliser un 4e chiffre
-// apres la virgule (ex. 16 HT + FODEC 1% + TVA 19% = 19,2304 — ce 4e chiffre
+// apres la virgule (ex. 16 HT + FODEC ${TAUX_FODEC * 100}% + TVA 19% = 19,2304 — ce 4e chiffre
 // n'existe dans aucune monnaie reelle). On arrondit au millime le plus proche
 // (1-4 vers le bas, 5-9 vers le haut, comme Math.round) AVANT tout calcul ou
 // affichage, et on reutilise ce prix arrondi pour le Total de la ligne : le
@@ -73,10 +74,10 @@ function formatDate(d) {
 // pres — donc la facture correspond exactement au prix engage dans l'appel
 // d'offres, quelle que soit la quantite.
 function calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc) {
-  const tauxFodec = avecFodec ? 0.01 : 0;
+  const tauxFodec = avecFodec ? TAUX_FODEC : 0;
   let ht;
   if (prixImposesTtc) {
-    const diviseurTtc = (1 + tauxFodec) * 1.19;
+    const diviseurTtc = (1 + tauxFodec) * (1 + TAUX_TVA);
     ht = lignes.reduce(
       (s, l) => s + (Number(l.quantite) || 0) * (arrondirMillime(l.prixUnitaire) / diviseurTtc),
       0
@@ -89,8 +90,8 @@ function calculerTotaux(lignes, avecFodec, avecTimbre, timbre, prixImposesTtc) {
     // sur ce sous-total HT.
     ht = lignes.reduce((s, l) => s + (Number(l.quantite) || 0) * arrondirMillime(l.prixUnitaire), 0);
   }
-  const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
+  const fodec = avecFodec ? ht * TAUX_FODEC : 0;
+  const tva = (ht + fodec) * TAUX_TVA;
   const ttc = ht + fodec + tva;
   const timbreApplique = avecTimbre ? Number(timbre) || 0 : 0;
   const totalGeneral = ttc + timbreApplique;
@@ -194,8 +195,8 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
     ? `<div class="totaux-lignes">
     <div class="totaux-strip">
       <div class="totaux-item"><span class="ti-label">P.T.H.T</span><span class="ti-val">${formatMontant(ht)}</span></div>
-      ${avecFodec ? `<div class="totaux-item"><span class="ti-label">FODEC 1%</span><span class="ti-val">${formatMontant(fodec)}</span></div>` : ""}
-      <div class="totaux-item"><span class="ti-label">T.V.A 19%</span><span class="ti-val">${formatMontant(tva)}</span></div>
+      ${avecFodec ? `<div class="totaux-item"><span class="ti-label">FODEC ${TAUX_FODEC * 100}%</span><span class="ti-val">${formatMontant(fodec)}</span></div>` : ""}
+      <div class="totaux-item"><span class="ti-label">T.V.A ${TAUX_TVA * 100}%</span><span class="ti-val">${formatMontant(tva)}</span></div>
       ${timbre > 0 ? `<div class="totaux-item"><span class="ti-label">Timbre fiscal</span><span class="ti-val">${formatMontant(timbre)}</span></div>` : ""}
     </div>
     <table class="totaux-final">
@@ -211,8 +212,8 @@ function renderInvoiceHtml(company = {}, invoice = {}) {
     </div>` : ""}
     <table>
       <tr><td class="label">P.T.H.T</td><td class="val">${formatMontant(ht)}</td></tr>
-      ${avecFodec ? `<tr><td class="label">FODEC 1%</td><td class="val">${formatMontant(fodec)}</td></tr>` : ""}
-      <tr><td class="label">T.V.A 19%</td><td class="val">${formatMontant(tva)}</td></tr>
+      ${avecFodec ? `<tr><td class="label">FODEC ${TAUX_FODEC * 100}%</td><td class="val">${formatMontant(fodec)}</td></tr>` : ""}
+      <tr><td class="label">T.V.A ${TAUX_TVA * 100}%</td><td class="val">${formatMontant(tva)}</td></tr>
       ${timbre > 0
         ? `<tr class="ttc"><td class="label">TOTAL T.T.C</td><td class="val">${formatMontant(ttc)}</td></tr>
       <tr><td class="label">Timbre fiscal</td><td class="val">${formatMontant(timbre)}</td></tr>

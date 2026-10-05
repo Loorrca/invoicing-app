@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { TAUX_TVA, TAUX_FODEC } from "../utils/taxRates.js";
 
 // Convertisseur P.H.T <-> P.T.T.C independant du formulaire de facture : deux
 // cases, le P.H.T et le P.T.T.C, modifiables l'une comme l'autre a tout
 // moment. Taper dans l'une recalcule l'autre automatiquement, sans avoir a
 // choisir un "sens" de conversion au prealable. Reprend exactement la meme
-// formule que le reste de l'application (FODEC 1% optionnel puis T.V.A 19%),
-// pour donner le meme resultat qu'une vraie facture.
+// formule que le reste de l'application (FODEC optionnel puis T.V.A, voir
+// utils/taxRates.js), pour donner le meme resultat qu'une vraie facture.
 
 function depuisHt(htStr, avecFodec) {
   const ht = Number(htStr);
   if (htStr === "" || !Number.isFinite(ht) || ht < 0) return null;
-  const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
+  const fodec = avecFodec ? ht * TAUX_FODEC : 0;
+  const tva = (ht + fodec) * TAUX_TVA;
   const ttc = ht + fodec + tva;
   return { ht, fodec, tva, ttc };
 }
@@ -19,10 +20,10 @@ function depuisHt(htStr, avecFodec) {
 function depuisTtc(ttcStr, avecFodec) {
   const ttc = Number(ttcStr);
   if (ttcStr === "" || !Number.isFinite(ttc) || ttc < 0) return null;
-  const facteurFodec = avecFodec ? 1.01 : 1;
-  const ht = ttc / (facteurFodec * 1.19);
-  const fodec = avecFodec ? ht * 0.01 : 0;
-  const tva = (ht + fodec) * 0.19;
+  const facteurFodec = avecFodec ? 1 + TAUX_FODEC : 1;
+  const ht = ttc / (facteurFodec * (1 + TAUX_TVA));
+  const fodec = avecFodec ? ht * TAUX_FODEC : 0;
+  const tva = (ht + fodec) * TAUX_TVA;
   return { ht, fodec, tva, ttc };
 }
 
@@ -71,7 +72,7 @@ export default function Calculatrice({ avecFodecParDefaut, onClose }) {
         <div className="calc-radio-group">
           <label className="checkbox-row">
             <input type="radio" name="calc-fodec" checked={avecFodec} onChange={() => setAvecFodec(true)} />
-            Avec FODEC (1%)
+            Avec FODEC ({TAUX_FODEC * 100}%)
           </label>
           <label className="checkbox-row">
             <input type="radio" name="calc-fodec" checked={!avecFodec} onChange={() => setAvecFodec(false)} />
@@ -120,12 +121,12 @@ export default function Calculatrice({ avecFodecParDefaut, onClose }) {
           </div>
           {avecFodec && (
             <div>
-              <span>FODEC 1%</span>
+              <span>FODEC {TAUX_FODEC * 100}%</span>
               <span>{fmt(resultat?.fodec)} DT</span>
             </div>
           )}
           <div>
-            <span>T.V.A 19%</span>
+            <span>T.V.A {TAUX_TVA * 100}%</span>
             <span>{fmt(resultat?.tva)} DT</span>
           </div>
           <div className={`ttc ${source === "ht" ? "calc-reponse" : ""}`}>

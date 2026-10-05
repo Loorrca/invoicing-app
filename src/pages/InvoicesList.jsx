@@ -69,22 +69,29 @@ export default function InvoicesList({ onEdit }) {
     const min = filters.montantMin !== "" ? Number(filters.montantMin) : null;
     const max = filters.montantMax !== "" ? Number(filters.montantMax) : null;
 
-    return invoices.filter((f) => {
-      if (
-        q &&
-        !(f.numero || "").toLowerCase().includes(q) &&
-        !nomClient(f.client).toLowerCase().includes(q) &&
-        !codeClient(f.client).toLowerCase().includes(q)
-      ) {
-        return false;
-      }
-      if (filters.du && (f.date || "") < filters.du) return false;
-      if (filters.au && (f.date || "") > filters.au) return false;
-      const ttc = f.totaux?.ttc ?? null;
-      if (min !== null && !Number.isNaN(min) && (ttc === null || ttc < min)) return false;
-      if (max !== null && !Number.isNaN(max) && (ttc === null || ttc > max)) return false;
-      return true;
-    });
+    return invoices
+      .filter((f) => {
+        if (
+          q &&
+          !(f.numero || "").toLowerCase().includes(q) &&
+          !nomClient(f.client).toLowerCase().includes(q) &&
+          !codeClient(f.client).toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+        if (filters.du && (f.date || "") < filters.du) return false;
+        if (filters.au && (f.date || "") > filters.au) return false;
+        const ttc = f.totaux?.ttc ?? null;
+        if (min !== null && !Number.isNaN(min) && (ttc === null || ttc < min)) return false;
+        if (max !== null && !Number.isNaN(max) && (ttc === null || ttc > max)) return false;
+        return true;
+      })
+      // Tri par numero de facture (le plus grand/recent en premier), pas par
+      // date d'ajout : {numeric: true} compare les numeros chiffre par
+      // chiffre plutot que lettre par lettre, pour que l'ancien format sans
+      // annee (ex. "0081") et le format actuel ("2026003") restent chacun
+      // dans le bon ordre.
+      .sort((a, b) => (b.numero || "").localeCompare(a.numero || "", "fr", { numeric: true }));
   }, [invoices, query, filters]);
 
   // Regroupe les factures (deja filtrees) par annee de la facture, du plus

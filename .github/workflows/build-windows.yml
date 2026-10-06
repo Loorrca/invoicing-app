@@ -11,6 +11,11 @@ name: Build Windows installer
 #   "Release" GitHub avec l'installeur .exe attache, telechargeable
 #   directement depuis la page principale du depot ("Releases" a droite).
 
+# Sur un tag vX.Y.Z, electron-builder (--publish always) cree/alimente
+# lui-meme la Release GitHub, avec l'installeur .exe ET le fichier
+# latest.yml necessaire au bouton "Mise a jour" dans l'application
+# (electron-updater) pour detecter qu'une nouvelle version existe.
+
 on:
   push:
     tags:
@@ -35,19 +40,18 @@ jobs:
       - name: Installer les dependances
         run: npm ci
 
-      - name: Construire l'installeur (electron-builder)
+      - name: Construire l'installeur, sans publier (lancement manuel hors tag)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist
+
+      - name: Construire et publier la Release GitHub (tag vX.Y.Z uniquement)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run dist:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mettre l'installeur a disposition (tout lancement)
         uses: actions/upload-artifact@v4
         with:
           name: facturation-windows-installer
           path: release/*.exe
-
-      - name: Publier une Release GitHub (uniquement sur un tag vX.Y.Z)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

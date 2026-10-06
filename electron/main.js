@@ -37,6 +37,16 @@ try {
   // voir ajouterNumerosDePage ci-dessous
 }
 
+// Idem pour electron-updater : tant que "npm install" n'a pas ete relance
+// pour recuperer cette nouvelle dependance, le bouton "Mise a jour" affiche
+// un message clair plutot que de faire planter l'appli au demarrage.
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require("electron-updater"));
+} catch {
+  // voir checkForUpdates ci-dessous
+}
+
 const isDev = !app.isPackaged;
 
 // Force la locale de Chromium en francais : c'est ce qui controle le format
@@ -125,6 +135,10 @@ function buildMenu() {
       ],
     },
     {
+      label: "Mise a jour",
+      click: () => checkForUpdates(),
+    },
+    {
       label: "Aide",
       submenu: [
         {
@@ -146,6 +160,92 @@ function buildMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// --------------------------------------------------------------------------
+// Mise a jour (bouton "Mise a jour" dans la barre de menu, a cote de
+// "Aide") : va chercher la derniere Release GitHub du depot, telecharge le
+// nouvel installeur si une version plus recente existe, puis demande a
+// l'utilisateur s'il veut redemarrer maintenant pour l'installer. Remplace
+// le desinstaller/reinstaller l'exe a la main depuis GitHub. Repose sur
+// electron-updater + la config "publish" (provider github) dans
+// package.json ; le workflow CI (.github/workflows/build-windows.yml)
+// publie l'installeur ET le fichier latest.yml necessaire a la detection
+// de version sur chaque tag vX.Y.Z.
+// --------------------------------------------------------------------------
+
+let updateCheckEnCours = false;
+
+function configurerAutoUpdater() {
+  if (!autoUpdater) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on("update-available", (info) => {
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Mise a jour",
+      message: `Nouvelle version disponible : ${info.version}`,
+      detail: "Telechargement en cours ; vous serez prevenu une fois prete a installer.",
+      buttons: ["OK"],
+    });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    updateCheckEnCours = false;
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Mise a jour",
+      message: "Vous avez deja la derniere version de Facturation.",
+      buttons: ["OK"],
+    });
+  });
+
+  autoUpdater.on("error", (err) => {
+    updateCheckEnCours = false;
+    dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "Mise a jour",
+      message: "Impossible de verifier ou de telecharger la mise a jour.",
+      detail: String(err?.message || err),
+      buttons: ["OK"],
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    updateCheckEnCours = false;
+    dialog
+      .showMessageBox(mainWindow, {
+        type: "question",
+        title: "Mise a jour prete",
+        message: `La version ${info.version} est prete a etre installee.`,
+        detail: "L'application va redemarrer pour terminer l'installation.",
+        buttons: ["Redemarrer maintenant", "Plus tard"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+      });
+  });
+}
+
+function checkForUpdates() {
+  if (!autoUpdater) {
+    dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "Mise a jour",
+      message: "Le module de mise a jour n'est pas installe dans cette version de l'application.",
+      buttons: ["OK"],
+    });
+    return;
+  }
+  if (updateCheckEnCours) return;
+  updateCheckEnCours = true;
+  autoUpdater.checkForUpdates().catch(() => {
+    // l'evenement "error" ci-dessus affiche deja le message a l'utilisateur
+    updateCheckEnCours = false;
+  });
 }
 
 function createWindow() {
@@ -179,6 +279,7 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
+  configurerAutoUpdater();
   buildMenu();
   createWindow();
 

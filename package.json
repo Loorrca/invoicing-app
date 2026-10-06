@@ -7,7 +7,8 @@
     "dev": "concurrently -k -n vite,electron -c blue,green \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build:renderer": "vite build",
     "start": "npm run build:renderer && electron .",
-    "dist": "npm run build:renderer && electron-builder"
+    "dist": "npm run build:renderer && electron-builder",
+    "dist:publish": "npm run build:renderer && electron-builder --publish always"
   },
   "keywords": [],
   "author": "Hamma",
@@ -26,6 +27,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
+    "electron-updater": "^6.3.9",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.0.379",
     "react": "^18.3.1",
@@ -36,7 +38,13 @@
     "appId": "tn.bouzidi.facturation",
     "productName": "Facturation",
     "npmRebuild": false,
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Loorrca",
+        "repo": "invoicing-app"
+      }
+    ],
     "directories": {
       "output": "release"
     },

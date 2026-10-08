@@ -689,7 +689,10 @@ table.invoices-table td.num { text-align: right; }
   border-radius: 999px;
 }
 
-.badge-payee { background: #e2efda; color: #1a7f37; }
+/* Payee en bleu (couleur d'accent de l'app) plutot qu'en vert : trop proche
+   visuellement du vert "aging-low" (anciennete des impayes, juste en
+   dessous) et du rouge "nonpayee" sur certains ecrans. */
+.badge-payee { background: #dde7fb; color: var(--accent); }
 .badge-probable { background: #fff2cc; color: #8a6d00; }
 .badge-nonpayee { background: #fce4e4; color: var(--danger); }
 

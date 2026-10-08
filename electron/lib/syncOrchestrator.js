@@ -53,13 +53,22 @@ const COLLECTIONS = [
 // moins une entreprise a afficher. Son id est propre a ce poste : une fois
 // la vraie entreprise recuperee depuis Drive, fusionnerParId les traite
 // comme deux enregistrements distincts et garde les deux, ce qui fait
-// apparaitre un second profil fantome "(Sans nom)" a cote du bon. Ce
-// placeholder est reconnaissable (marqueur estPlaceholderAuto, jamais
-// modifie depuis sa creation) et jetable sans perte : on l'ecarte du
-// resultat fusionne des qu'au moins une autre entreprise (reelle) existe
-// aussi dans ce resultat.
+// apparaitre un second profil fantome "(Sans nom)" a cote du bon.
+//
+// On la reconnait par ses donnees plutot que par le seul marqueur
+// estPlaceholderAuto (db.js) : nom vide ET jamais modifiee depuis sa
+// creation (updatedAt === createdAt — toute sauvegarde reelle, meme
+// partielle, change updatedAt). Ca couvre aussi bien les placeholders
+// crees par les versions a jour de db.js que ceux deja crees par une
+// version plus ancienne (sans le marqueur) avant ce correctif — sans quoi
+// un poste deja touche par le bug resterait pollue pour toujours, meme
+// apres la mise a jour. Des qu'au moins une autre entreprise (reelle)
+// existe dans le resultat fusionne, ce placeholder est jetable sans perte.
 function estPlaceholderJetable(c) {
-  return !!(c && c.estPlaceholderAuto && c.updatedAt === c.createdAt);
+  if (!c) return false;
+  const nomVide = !c.company_name || !c.company_name.trim();
+  const jamaisModifiee = c.updatedAt === c.createdAt;
+  return nomVide && jamaisModifiee;
 }
 
 function retirerPlaceholdersVides(companies) {

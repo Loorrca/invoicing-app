@@ -47,12 +47,37 @@ const COLLECTIONS = [
   },
 ];
 
+// Un poste tout juste installe/reinitialise cree localement, avant meme
+// que la synchronisation ait eu la chance de tourner, une entreprise par
+// defaut vide (voir db.js, newCompany/load) pour que l'app ait toujours au
+// moins une entreprise a afficher. Son id est propre a ce poste : une fois
+// la vraie entreprise recuperee depuis Drive, fusionnerParId les traite
+// comme deux enregistrements distincts et garde les deux, ce qui fait
+// apparaitre un second profil fantome "(Sans nom)" a cote du bon. Ce
+// placeholder est reconnaissable (marqueur estPlaceholderAuto, jamais
+// modifie depuis sa creation) et jetable sans perte : on l'ecarte du
+// resultat fusionne des qu'au moins une autre entreprise (reelle) existe
+// aussi dans ce resultat.
+function estPlaceholderJetable(c) {
+  return !!(c && c.estPlaceholderAuto && c.updatedAt === c.createdAt);
+}
+
+function retirerPlaceholdersVides(companies) {
+  if (!Array.isArray(companies) || companies.length <= 1) return companies;
+  const reelles = companies.filter((c) => !estPlaceholderJetable(c));
+  // Si tout n'est que des placeholders (deux postes neufs synchronises
+  // avant que l'un ou l'autre n'ait de vraies donnees), on ne vide pas la
+  // liste : rien de mieux a garder pour l'instant.
+  return reelles.length > 0 ? reelles : companies;
+}
+
 // Synchronise une seule collection : telecharge, fusionne, ecrit localement,
 // renvoie sur Drive. Renvoie le nombre d'enregistrements apres fusion.
 async function synchroniserCollection(def) {
   const distant = await telechargerJson(def.nom); // null si jamais synchronise depuis aucun poste
   const local = def.listerLocal();
-  const fusionne = fusionnerParId(local, distant || []);
+  let fusionne = fusionnerParId(local, distant || []);
+  if (def.nom === "companies.json") fusionne = retirerPlaceholdersVides(fusionne);
   def.remplacerLocal(fusionne);
   await envoyerJson(def.nom, fusionne);
   return fusionne.length;

@@ -29,9 +29,23 @@ let filePath = null;
 let legacyFilePath = null; // ancien fichier "settings.json" (une seule entreprise)
 let store = null; // { companies: [...], active_company_id: string }
 
-function newCompany(fields = {}) {
+// placeholderAuto : marque une entreprise creee automatiquement en
+// secours (poste tout juste installe/reinitialise, companies.json absent
+// ou vide), PAS une entreprise ajoutee volontairement par l'utilisateur
+// (voir addCompany) ni une recuperee depuis l'ancien format (elle contient
+// deja de vraies donnees). Ce marqueur permet a syncOrchestrator.js de la
+// reconnaitre et de l'ecarter une fois que la vraie entreprise arrive par
+// la synchronisation, au lieu de la garder comme un deuxieme profil
+// fantome "(Sans nom)" a cote de la bonne (voir retirerPlaceholdersVides).
+// Il est retire des la premiere sauvegarde reelle sur cette entreprise
+// (voir saveActiveCompany) : passe ce point, ce n'est plus un brouillon
+// jetable mais une saisie de l'utilisateur, a conserver meme en cas de
+// doublon.
+function newCompany(fields = {}, { placeholderAuto = false } = {}) {
   const maintenant = new Date().toISOString();
-  return { id: crypto.randomUUID(), ...COMPANY_DEFAULTS, createdAt: maintenant, updatedAt: maintenant, ...fields };
+  const company = { id: crypto.randomUUID(), ...COMPANY_DEFAULTS, createdAt: maintenant, updatedAt: maintenant, ...fields };
+  if (placeholderAuto) company.estPlaceholderAuto = true;
+  return company;
 }
 
 // Migration ponctuelle (demande explicite de l'utilisateur) : MASTERFLAG
@@ -72,7 +86,7 @@ function load() {
   }
 
   if (!raw) {
-    const company = newCompany();
+    const company = newCompany({}, { placeholderAuto: true });
     return { companies: [company], active_company_id: company.id };
   }
 
@@ -84,7 +98,7 @@ function load() {
   }
 
   if (raw.companies.length === 0) {
-    const company = newCompany();
+    const company = newCompany({}, { placeholderAuto: true });
     return { companies: [company], active_company_id: company.id };
   }
 
@@ -132,8 +146,13 @@ function setActiveCompany(id) {
 function saveActiveCompany(fields) {
   const idx = store.companies.findIndex((c) => c.id === store.active_company_id);
   if (idx === -1) return getActiveCompany();
+  // Une fois sauvegardee par l'utilisateur, ce n'est plus un brouillon
+  // jetable (voir newCompany) meme si elle a ete creee automatiquement :
+  // on retire le marqueur pour qu'elle ne soit plus jamais ecartee par
+  // retirerPlaceholdersVides (syncOrchestrator.js).
+  const { estPlaceholderAuto, ...sansMarqueur } = store.companies[idx];
   store.companies[idx] = {
-    ...store.companies[idx],
+    ...sansMarqueur,
     ...fields,
     id: store.companies[idx].id,
     updatedAt: new Date().toISOString(),

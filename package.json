@@ -1,6 +1,6 @@
 {
   "name": "invoicing-app",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Application de facturation avec tableau de bord et generation de factures PDF",
   "main": "electron/main.js",
   "scripts": {

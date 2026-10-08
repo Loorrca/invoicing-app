@@ -30,7 +30,8 @@ let legacyFilePath = null; // ancien fichier "settings.json" (une seule entrepri
 let store = null; // { companies: [...], active_company_id: string }
 
 function newCompany(fields = {}) {
-  return { id: crypto.randomUUID(), ...COMPANY_DEFAULTS, ...fields };
+  const maintenant = new Date().toISOString();
+  return { id: crypto.randomUUID(), ...COMPANY_DEFAULTS, createdAt: maintenant, updatedAt: maintenant, ...fields };
 }
 
 // Migration ponctuelle (demande explicite de l'utilisateur) : MASTERFLAG
@@ -131,9 +132,35 @@ function setActiveCompany(id) {
 function saveActiveCompany(fields) {
   const idx = store.companies.findIndex((c) => c.id === store.active_company_id);
   if (idx === -1) return getActiveCompany();
-  store.companies[idx] = { ...store.companies[idx], ...fields, id: store.companies[idx].id };
+  store.companies[idx] = {
+    ...store.companies[idx],
+    ...fields,
+    id: store.companies[idx].id,
+    updatedAt: new Date().toISOString(),
+  };
   persist();
   return store.companies[idx];
+}
+
+// Version brute (toutes les entreprises) : reservee a la synchronisation
+// entre postes (voir electron/lib/syncOrchestrator.js). Pas de suppression
+// douce ici contrairement aux autres collections : l'app n'offre aucune
+// fonctionnalite de suppression d'entreprise, donc pas de tombstone a
+// propager.
+function listAllForSync() {
+  return store.companies;
+}
+
+// Remplace l'ensemble des profils entreprise par une liste deja fusionnee
+// avec le distant (voir syncOrchestrator.js). L'entreprise active reste
+// celle deja selectionnee sur ce poste si elle existe toujours dans la liste
+// fusionnee, sinon on retombe sur la premiere (meme logique que load() au
+// tout premier demarrage de l'app).
+function remplacerCompanies(nouvelles) {
+  store.companies = nouvelles;
+  const activeExists = store.companies.some((c) => c.id === store.active_company_id);
+  if (!activeExists) store.active_company_id = store.companies[0] ? store.companies[0].id : null;
+  persist();
 }
 
 function addCompany(fields = {}) {
@@ -147,9 +174,11 @@ function addCompany(fields = {}) {
 module.exports = {
   initDb,
   listCompanies,
+  listAllForSync,
   getActiveCompany,
   getCompanyById,
   setActiveCompany,
   saveActiveCompany,
   addCompany,
+  remplacerCompanies,
 };

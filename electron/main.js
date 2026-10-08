@@ -27,6 +27,8 @@ const {
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
 const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch } = require("./payments");
 const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require("./backup");
+const driveSync = require("./lib/driveSync");
+const { executerCycleDeSync, synchroniserFacturesAvantNumerotation } = require("./lib/syncOrchestrator");
 
 // Optionnel : si le module n'est pas installe (npm install manquant), on se
 // contente de ne pas numeroter les pages plutot que de planter l'appli.
@@ -45,6 +47,37 @@ try {
   ({ autoUpdater } = require("electron-updater"));
 } catch {
   // voir checkForUpdates ci-dessous
+}
+
+// --------------------------------------------------------------------------
+// Synchronisation entre postes (voir electron/lib/driveSync.js et
+// syncMerge.js) : chemin fixe du fichier de cles du compte de service, et id
+// du dossier Drive partage. Le chemin suit app.getPath("userData"), le meme
+// dossier que companies.json/clients.json/invoices.json/articles.json —
+// c'est-a-dire %APPDATA%\invoicing-app\drive-sync-key.json sous Windows (les
+// deux postes de production) et ~/.config/invoicing-app/drive-sync-key.json
+// sous Linux (ce poste de dev/test). Le fichier n'est JAMAIS dans le depot ni
+// le build (voir .gitignore) : il est depose a la main, une fois par poste.
+const DRIVE_SYNC_FOLDER_ID = "1RnP93zlOBc0RHA31HpbAQVXvHuoLC4Lq";
+
+function driveSyncKeyFilePath() {
+  return path.join(app.getPath("userData"), "drive-sync-key.json");
+}
+
+// N'initialise le transport que si le fichier de cles existe deja sur ce
+// poste : sur un poste pas encore configure, c'est un no-op silencieux (voir
+// driveSync.estConfigure()) — aucun changement de comportement pour l'instant,
+// le cycle telecharger/fusionner/renvoyer reste a construire une fois ce
+// transport verifie avec de vraies cles.
+function configurerSynchronisationDrive() {
+  const keyFilePath = driveSyncKeyFilePath();
+  if (!fs.existsSync(keyFilePath)) return;
+  try {
+    driveSync.initDriveSync({ keyFilePath, folderId: DRIVE_SYNC_FOLDER_ID });
+    console.log(`Sync Drive : cle trouvee, transport initialise (${keyFilePath})`);
+  } catch (err) {
+    console.error("Sync Drive : initialisation echouee", err);
+  }
 }
 
 const isDev = !app.isPackaged;
@@ -230,6 +263,27 @@ function configurerAutoUpdater() {
   });
 }
 
+// --------------------------------------------------------------------------
+// Cycle de synchronisation periodique (voir electron/lib/syncOrchestrator.js)
+// : un premier cycle peu apres le demarrage (le temps que l'appli finisse de
+// charger), puis un cycle toutes les 5 minutes. Ne fait rien de visible tant
+// que la cle n'est pas configuree sur ce poste (voir executerCycleDeSync) —
+// le minuteur tourne alors "dans le vide", ce qui est le comportement voulu
+// avant que l'utilisateur n'ait place le fichier de cles ici.
+// --------------------------------------------------------------------------
+
+const SYNC_PERIODIQUE_MS = 5 * 60 * 1000;
+
+function demarrerSyncPeriodique() {
+  setTimeout(() => {
+    executerCycleDeSync().catch((err) => console.error("Sync Drive : echec du cycle initial", err));
+  }, 5000);
+
+  setInterval(() => {
+    executerCycleDeSync().catch((err) => console.error("Sync Drive : echec du cycle periodique", err));
+  }, SYNC_PERIODIQUE_MS);
+}
+
 function checkForUpdates() {
   if (!autoUpdater) {
     dialog.showMessageBox(mainWindow, {
@@ -279,6 +333,8 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
+  configurerSynchronisationDrive();
+  demarrerSyncPeriodique();
   configurerAutoUpdater();
   buildMenu();
   createWindow();
@@ -338,7 +394,15 @@ ipcMain.handle("invoices:list", () => listInvoices(getActiveCompany().id));
 
 ipcMain.handle("invoices:get", (_event, id) => getInvoice(id));
 
-ipcMain.handle("invoices:nextNumero", () => nextNumero(getActiveCompany().id));
+// Avant de proposer un numero, on tente une synchro rapide des factures
+// (voir synchroniserFacturesAvantNumerotation) : si l'autre poste a emis des
+// factures depuis le dernier cycle periodique, on en tient compte plutot que
+// de risquer un numero deja pris. Echoue silencieusement si Drive n'est pas
+// joignable a cet instant (pas de cle configuree, reseau coupe, etc.).
+ipcMain.handle("invoices:nextNumero", async () => {
+  await synchroniserFacturesAvantNumerotation();
+  return nextNumero(getActiveCompany().id);
+});
 
 ipcMain.handle("invoices:delete", (_event, id) => {
   const record = getInvoice(id);
@@ -607,14 +671,54 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
   return { canceled: false, filePath: newFilePath, id: record.id };
 });
 
-// Ouvre le PDF deja enregistre d'une facture avec la visionneuse par defaut
-// du systeme (au lieu de le regenerer).
+// Reconstruit le profil entreprise a utiliser pour regenerer le PDF d'une
+// facture deja enregistree (impression, ou "Voir le PDF" si le fichier a
+// disparu du disque) : part de l'instantane fige sur la facture au moment de
+// son emission, mais comble logo/QR/gabarit et les champs d'identite
+// manquants avec le profil ACTUEL de l'entreprise plutot que de laisser un
+// encart vide (vieille facture migree d'un autre poste, import sans les
+// PDF, instantane incomplet, etc.).
+function companySnapshotPourRegeneration(record) {
+  const companyActuelle = getCompanyById(record.companyId);
+  const logoActuel = companyActuelle?.logo_data_url || "";
+  const qrActuel = companyActuelle?.qr_data_url || "";
+  const CHAMPS_IDENTITE = ["company_name", "address", "rne", "tax_id", "tel_fax", "phone", "email", "rib", "siege"];
+  const company = { ...(record.company || {}) };
+  for (const champ of CHAMPS_IDENTITE) {
+    if (!company[champ] && companyActuelle?.[champ]) company[champ] = companyActuelle[champ];
+  }
+  company.logo_data_url = record.company?.logo_data_url || logoActuel;
+  company.qr_data_url = record.company?.qr_data_url || qrActuel;
+  company.invoice_template = record.company?.invoice_template || companyActuelle?.invoice_template || "classic";
+  return company;
+}
+
+// Ouvre le PDF d'une facture avec la visionneuse par defaut du systeme. Si le
+// fichier n'est plus sur ce poste (import d'une sauvegarde/du JSON sans les
+// PDF, fichier deplace/supprime a la main, poste different...), on le
+// regenere d'abord a la volee a partir des donnees de la facture, exactement
+// comme pour l'impression, puis on l'ouvre normalement : plus besoin de
+// passer par "Modifier" > "Enregistrer" pour faire reapparaitre un PDF
+// manquant, et plus besoin de trimballer le dossier Facturation complet avec
+// les PDF a chaque sauvegarde/restauration.
 ipcMain.handle("invoice:openPdf", async (_event, id) => {
   const record = getInvoice(id);
-  if (!record?.filePath || !fs.existsSync(record.filePath)) {
-    return { opened: false, error: "Le fichier PDF est introuvable (deplace ou supprime)." };
+  if (!record) return { opened: false, error: "Facture introuvable." };
+
+  let filePath = record.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    try {
+      const company = companySnapshotPourRegeneration(record);
+      const html = renderInvoiceHtml(company, record);
+      filePath = invoiceFilePath(company, record.numero);
+      await writePdfToFile(html, filePath);
+      updateInvoice(id, { filePath });
+    } catch (err) {
+      return { opened: false, error: `Impossible de regenerer le PDF : ${err?.message || err}` };
+    }
   }
-  const result = await shell.openPath(record.filePath);
+
+  const result = await shell.openPath(filePath);
   if (result) return { opened: false, error: result };
   return { opened: true };
 });
@@ -665,18 +769,9 @@ ipcMain.handle("invoice:print", async (_event, id) => {
   // moment de l'emission). Mais une facture dont l'instantane est absent ou
   // incomplet (import de donnees sans ce champ, ou migration vers un autre
   // poste) retombe sur le profil actuel plutot que d'afficher un encart
-  // entreprise vide a l'impression.
-  const companyActuelle = getCompanyById(record.companyId);
-  const logoActuel = companyActuelle?.logo_data_url || "";
-  const qrActuel = companyActuelle?.qr_data_url || "";
-  const CHAMPS_IDENTITE = ["company_name", "address", "rne", "tax_id", "tel_fax", "phone", "email", "rib", "siege"];
-  const company = { ...(record.company || {}) };
-  for (const champ of CHAMPS_IDENTITE) {
-    if (!company[champ] && companyActuelle?.[champ]) company[champ] = companyActuelle[champ];
-  }
-  company.logo_data_url = record.company?.logo_data_url || logoActuel;
-  company.qr_data_url = record.company?.qr_data_url || qrActuel;
-  company.invoice_template = record.company?.invoice_template || companyActuelle?.invoice_template || "classic";
+  // entreprise vide a l'impression. (voir companySnapshotPourRegeneration
+  // ci-dessus, partagee avec invoice:openPdf)
+  const company = companySnapshotPourRegeneration(record);
   const html = renderInvoiceHtml(company, record);
 
   const printWindow = new BrowserWindow({

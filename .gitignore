@@ -6,3 +6,12 @@ test-output/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Cle de compte de service Google (synchronisation entre postes, voir
+# electron/lib/driveSync.js) : ne doit jamais atterrir dans le depot ou le
+# build, le depot et les Releases GitHub sont publics. Convention : le
+# fichier vit dans le dossier de donnees de l'app (userData), jamais ici,
+# mais ce filtre reste en securite au cas ou quelqu'un le depose par
+# habitude a la racine du projet pendant les tests.
+drive-sync-key.json
+*.serviceaccount.json

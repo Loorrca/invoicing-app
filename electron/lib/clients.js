@@ -37,15 +37,24 @@ function initClients(userDataDir) {
 }
 
 function listClients() {
-  return [...clients].sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+  return clients
+    .filter((c) => !c.deletedAt)
+    .sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+}
+
+// Version non filtree (tombstones de suppression inclus), reservee a la
+// synchronisation entre postes (voir electron/lib/syncMerge.js).
+function listAllForSync() {
+  return clients;
 }
 
 // Code client auto-genere : toujours 3 chiffres ("001", "002", ...), le
 // premier numero de la plage 001-999 qui n'est pas deja utilise par un
-// client existant. Evite les doublons sans demander a l'utilisateur de s'en
-// occuper lui-meme a la creation.
+// client existant (un client supprime libere son code, comme avant l'ajout
+// de la suppression "douce"). Evite les doublons sans demander a
+// l'utilisateur de s'en occuper lui-meme a la creation.
 function genererCodeClient() {
-  const utilises = new Set(clients.map((c) => c.code));
+  const utilises = new Set(clients.filter((c) => !c.deletedAt).map((c) => c.code));
   for (let n = 1; n <= 999; n++) {
     const code = String(n).padStart(3, "0");
     if (!utilises.has(code)) return code;
@@ -58,8 +67,9 @@ function addClient(fields = {}) {
   const adresse = String(fields.adresse || "").trim();
   if (!nom) throw new Error("Nom du client requis");
 
+  const maintenant = new Date().toISOString();
   const code = genererCodeClient();
-  const client = { id: crypto.randomUUID(), nom, code, adresse };
+  const client = { id: crypto.randomUUID(), nom, code, adresse, createdAt: maintenant, updatedAt: maintenant };
   clients.push(client);
   persist();
   return client;
@@ -80,13 +90,38 @@ function updateClient(id, fields = {}) {
   if (fields.adresse !== undefined) {
     client.adresse = String(fields.adresse || "").trim();
   }
+  client.updatedAt = new Date().toISOString();
   persist();
   return client;
 }
 
+// Suppression "douce" (tombstone) : voir le commentaire equivalent dans
+// invoices.js. Invisible pour le reste de l'app : listClients() et
+// genererCodeClient() l'ignorent deja.
 function deleteClient(id) {
-  clients = clients.filter((c) => c.id !== id);
+  const client = clients.find((c) => c.id === id);
+  if (!client) return;
+  const maintenant = new Date().toISOString();
+  client.deletedAt = maintenant;
+  client.updatedAt = maintenant;
   persist();
 }
 
-module.exports = { initClients, listClients, addClient, updateClient, deleteClient };
+// Remplace tout le catalogue par une liste deja fusionnee avec le distant
+// (voir syncOrchestrator.js). Memes remarques que remplacerToutesLesFactures
+// dans invoices.js : aucun horodatage touche ici, deja present sur chaque
+// enregistrement.
+function remplacerTousLesClients(nouveaux) {
+  clients = nouveaux;
+  persist();
+}
+
+module.exports = {
+  initClients,
+  listClients,
+  listAllForSync,
+  addClient,
+  updateClient,
+  deleteClient,
+  remplacerTousLesClients,
+};

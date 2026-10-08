@@ -14,6 +14,25 @@ function formatDate(d) {
 
 const EMPTY_FILTERS = { du: "", au: "", montantMin: "", montantMax: "" };
 
+// Position de defilement du panneau .content (voir App.jsx), gardee EN
+// DEHORS du composant : "Modifier" change d'onglet dans App.jsx, ce qui
+// demonte entierement InvoicesList (rendu conditionnel par onglet) puis le
+// remonte au retour — un ref interne au composant ne survivrait pas a ce
+// cycle, une variable de module si, puisque le module reste charge pendant
+// toute la duree de vie de l'appli.
+let dernierScrollTop = 0;
+
+// Annees "ouvertes" (voir plus bas), gardees EN DEHORS du composant pour la
+// meme raison que dernierScrollTop ci-dessus : sans ca, "Modifier" -> Save
+// (qui remonte InvoicesList de zero) oubliait quelles annees l'utilisateur
+// avait depliees et revenait a "seulement l'annee la plus recente" — ce qui
+// pouvait rendre la liste bien plus courte qu'avant l'edition et empechait
+// le defilement d'etre restaure correctement (rien a quoi le restaurer).
+// null = "jamais initialise de toute la session" (vraiment le tout premier
+// chargement), distinct d'un Set() vide (l'utilisateur a referme toutes les
+// annees a la main).
+let expandedYearsMemoire = null;
+
 export default function InvoicesList({ onEdit }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,25 +43,32 @@ export default function InvoicesList({ onEdit }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [printingId, setPrintingId] = useState(null);
   // Annees "ouvertes" dans la liste groupee par annee (voir groups plus
-  // bas). Initialise une seule fois, au premier chargement, sur l'annee la
-  // plus recente qui a des factures (pas forcement l'annee civile en
-  // cours, ex. aucune facture encore saisie en janvier) — un refresh
-  // ulterieur (apres suppression, etc.) ne doit pas reinitialiser ce que
-  // l'utilisateur a deja ouvert/ferme a la main.
-  const [expandedYears, setExpandedYears] = useState(() => new Set());
-  const expansionInitRef = useRef(false);
+  // bas). Initialise une seule fois par session (voir expandedYearsMemoire
+  // plus haut), sur l'annee la plus recente qui a des factures (pas
+  // forcement l'annee civile en cours, ex. aucune facture encore saisie en
+  // janvier) — ni un refresh ulterieur (apres suppression, etc.) ni un
+  // remontage du composant (retour depuis "Modifier") ne doivent
+  // reinitialiser ce que l'utilisateur a deja ouvert/ferme a la main.
+  const [expandedYears, setExpandedYears] = useState(() => expandedYearsMemoire || new Set());
+  // Vrai seulement avant le tout premier chargement : un refresh() declenche
+  // ensuite par une action (suppression...) ne doit pas remplacer toute la
+  // liste par "Chargement..." le temps de recharger, sinon le panneau
+  // .content (voir App.jsx) s'effondre puis se reconstruit, ce qui
+  // reinitialise sa position de defilement (voir les effets plus bas).
+  const premierAffichageRef = useRef(true);
 
   async function refresh() {
-    setLoading(true);
+    if (premierAffichageRef.current) setLoading(true);
     const list = await window.api.listInvoices();
     setInvoices(list);
-    if (!expansionInitRef.current) {
-      expansionInitRef.current = true;
+    if (expandedYearsMemoire === null) {
       const annees = list.map((f) => (f.date || "").slice(0, 4)).filter((a) => /^\d{4}$/.test(a));
       const plusRecente = annees.length ? annees.sort().slice(-1)[0] : String(new Date().getFullYear());
-      setExpandedYears(new Set([plusRecente]));
+      expandedYearsMemoire = new Set([plusRecente]);
+      setExpandedYears(expandedYearsMemoire);
     }
     setLoading(false);
+    premierAffichageRef.current = false;
   }
 
   function toggleYear(year) {
@@ -50,6 +76,7 @@ export default function InvoicesList({ onEdit }) {
       const next = new Set(prev);
       if (next.has(year)) next.delete(year);
       else next.add(year);
+      expandedYearsMemoire = next;
       return next;
     });
   }
@@ -57,6 +84,28 @@ export default function InvoicesList({ onEdit }) {
   useEffect(() => {
     refresh();
   }, []);
+
+  // Garde la position de defilement du panneau a jour en continu pendant que
+  // la liste est affichee, pour qu'elle soit disponible au prochain montage
+  // (retour depuis "Modifier", voir App.jsx).
+  useEffect(() => {
+    const panneau = document.querySelector(".content");
+    if (!panneau) return;
+    function onScroll() {
+      dernierScrollTop = panneau.scrollTop;
+    }
+    panneau.addEventListener("scroll", onScroll);
+    return () => panneau.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Restaure la position de defilement une fois la liste (de nouveau)
+  // affichee : au tout premier montage (0, sans effet visible) comme au
+  // retour depuis "Modifier" (ou apres toute autre raison de remontage).
+  useEffect(() => {
+    if (loading) return;
+    const panneau = document.querySelector(".content");
+    if (panneau) panneau.scrollTop = dernierScrollTop;
+  }, [loading]);
 
   function updateFilter(field, value) {
     setFilters((f) => ({ ...f, [field]: value }));

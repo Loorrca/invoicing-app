@@ -56,8 +56,14 @@ function initArticles(userDataDir, companyIds = []) {
 
 function listArticles(companyId) {
   return articles
-    .filter((a) => a.companyId === companyId)
+    .filter((a) => a.companyId === companyId && !a.deletedAt)
     .sort((a, b) => a.designation.localeCompare(b.designation, "fr"));
+}
+
+// Version non filtree (tombstones de suppression inclus), reservee a la
+// synchronisation entre postes (voir electron/lib/syncMerge.js).
+function listAllForSync() {
+  return articles;
 }
 
 function addArticle(companyId, fields = {}) {
@@ -66,21 +72,32 @@ function addArticle(companyId, fields = {}) {
   const code = String(fields.code || "").trim();
   if (!designation) throw new Error("Designation requise");
 
+  const maintenant = new Date().toISOString();
+
   // Si un article du meme nom existe deja pour cette entreprise (insensible
   // a la casse), on met a jour son prix (et son code) par defaut plutot que
   // de creer un doublon. Deux entreprises differentes peuvent en revanche
   // avoir chacune un article du meme nom, independamment.
   const existing = articles.find(
-    (a) => a.companyId === companyId && a.designation.toLowerCase() === designation.toLowerCase()
+    (a) => a.companyId === companyId && !a.deletedAt && a.designation.toLowerCase() === designation.toLowerCase()
   );
   if (existing) {
     existing.prixUnitaire = prixUnitaire;
     existing.code = code;
+    existing.updatedAt = maintenant;
     persist();
     return existing;
   }
 
-  const article = { id: crypto.randomUUID(), companyId, designation, prixUnitaire, code };
+  const article = {
+    id: crypto.randomUUID(),
+    companyId,
+    designation,
+    prixUnitaire,
+    code,
+    createdAt: maintenant,
+    updatedAt: maintenant,
+  };
   articles.push(article);
   persist();
   return article;
@@ -106,13 +123,36 @@ function updateArticle(id, fields = {}) {
   if (fields.code !== undefined) {
     article.code = String(fields.code || "").trim();
   }
+  article.updatedAt = new Date().toISOString();
   persist();
   return article;
 }
 
+// Suppression "douce" (tombstone) : voir le commentaire equivalent dans
+// invoices.js. Invisible pour le reste de l'app : listArticles() l'ignore
+// deja.
 function deleteArticle(id) {
-  articles = articles.filter((a) => a.id !== id);
+  const article = articles.find((a) => a.id === id);
+  if (!article) return;
+  const maintenant = new Date().toISOString();
+  article.deletedAt = maintenant;
+  article.updatedAt = maintenant;
   persist();
 }
 
-module.exports = { initArticles, listArticles, addArticle, updateArticle, deleteArticle };
+// Remplace tout le catalogue par une liste deja fusionnee avec le distant
+// (voir syncOrchestrator.js). Meme remarque que dans invoices.js/clients.js.
+function remplacerTousLesArticles(nouveaux) {
+  articles = nouveaux;
+  persist();
+}
+
+module.exports = {
+  initArticles,
+  listArticles,
+  listAllForSync,
+  addArticle,
+  updateArticle,
+  deleteArticle,
+  remplacerTousLesArticles,
+};

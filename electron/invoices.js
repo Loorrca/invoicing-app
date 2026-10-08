@@ -70,8 +70,16 @@ function initInvoices(userDataDir) {
 
 function listInvoices(companyId) {
   return invoices
-    .filter((f) => f.companyId === companyId)
+    .filter((f) => f.companyId === companyId && !f.deletedAt)
     .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+// Version non filtree (tombstones de suppression inclus), reservee a la
+// synchronisation entre postes (voir electron/lib/syncMerge.js) : une fusion
+// doit voir les suppressions pour pouvoir les propager, jamais la liste deja
+// filtree que l'app affiche.
+function listAllForSync() {
+  return invoices;
 }
 
 function getInvoice(id) {
@@ -84,21 +92,25 @@ function getInvoice(id) {
 // factures deja emises cette annee-la (y compris celles au format precedent,
 // ex. "0081"), il ne repart jamais a 1 au moment du changement de format.
 // Le champ reste modifiable a la main si besoin (cas particulier, correction).
+// Une facture supprimee (tombstone) ne compte pas, comme avant l'ajout de la
+// suppression "douce" (son emplacement redevient disponible).
 function nextNumero(companyId) {
   const annee = String(new Date().getFullYear());
   const dejaCetteAnnee = invoices.filter(
-    (f) => f.companyId === companyId && (f.date || "").slice(0, 4) === annee
+    (f) => f.companyId === companyId && !f.deletedAt && (f.date || "").slice(0, 4) === annee
   ).length;
   const rang = String(dejaCetteAnnee + 1).padStart(3, "0");
   return `${annee}${rang}`;
 }
 
 function addInvoice(fields = {}) {
+  const maintenant = new Date().toISOString();
   const invoice = {
     id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
+    createdAt: maintenant,
     ...fields,
     company: sansLogo(fields.company),
+    updatedAt: maintenant,
   };
   invoices.push(invoice);
   persist();
@@ -114,17 +126,36 @@ function updateInvoice(id, fields = {}) {
   return invoices[idx];
 }
 
+// Suppression "douce" (tombstone) : garde l'enregistrement avec un champ
+// deletedAt plutot que de le retirer du tableau, pour qu'une synchronisation
+// avec un autre poste sache qu'il a ete supprime (et ne le fasse pas
+// reapparaitre) au lieu de simplement ne plus le voir passer. Invisible pour
+// le reste de l'app : listInvoices()/nextNumero() l'ignorent deja.
 function deleteInvoice(id) {
-  invoices = invoices.filter((f) => f.id !== id);
+  const idx = invoices.findIndex((f) => f.id === id);
+  if (idx === -1) return;
+  const maintenant = new Date().toISOString();
+  invoices[idx] = { ...invoices[idx], deletedAt: maintenant, updatedAt: maintenant };
+  persist();
+}
+
+// Remplace tout l'historique par une liste deja fusionnee avec le distant
+// (voir electron/lib/syncOrchestrator.js). Contrairement a addInvoice /
+// updateInvoice, ne stamp rien : les enregistrements arrivent deja avec leur
+// propre updatedAt, fixe par le poste qui les a vraiment crees/modifies.
+function remplacerToutesLesFactures(nouvelles) {
+  invoices = nouvelles;
   persist();
 }
 
 module.exports = {
   initInvoices,
   listInvoices,
+  listAllForSync,
   getInvoice,
   nextNumero,
   addInvoice,
   updateInvoice,
   deleteInvoice,
+  remplacerToutesLesFactures,
 };

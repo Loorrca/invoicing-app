@@ -1,6 +1,6 @@
 {
   "name": "invoicing-app",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Application de facturation avec tableau de bord et generation de factures PDF",
   "main": "electron/main.js",
   "scripts": {
@@ -28,6 +28,7 @@
   "dependencies": {
     "adm-zip": "^0.6.1",
     "electron-updater": "^6.3.9",
+    "google-auth-library": "^9.14.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.0.379",
     "react": "^18.3.1",
@@ -42,7 +43,8 @@
       {
         "provider": "github",
         "owner": "Loorrca",
-        "repo": "invoicing-app"
+        "repo": "invoicing-app",
+        "releaseType": "release"
       }
     ],
     "directories": {

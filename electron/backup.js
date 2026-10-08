@@ -33,6 +33,13 @@ const APP_DATA_FILES = [
 
 const MANIFEST_VERSION = 1;
 
+// Les 4 collections aussi concernees par la synchronisation entre postes
+// (voir electron/lib/syncOrchestrator.js) : une restauration doit reestampiller
+// leurs enregistrements (voir reestampiller() plus bas), les autres fichiers
+// (settings.json, payments-overrides.json, activity-imports.json) n'etant pas
+// synchronises, ils sont simplement recopies tels quels.
+const SYNC_COLLECTION_FILES = new Set(["companies.json", "clients.json", "articles.json", "invoices.json"]);
+
 function initBackup(userDataDirArg, documentsDirArg) {
   userDataDir = userDataDirArg;
   documentsDir = documentsDirArg;
@@ -122,6 +129,40 @@ function inspectBackup(zipPath) {
   return { valid: true, entries: entries.length };
 }
 
+// Reestampille (updatedAt) chaque enregistrement d'une collection
+// synchronisable avec l'instant de la restauration, sans toucher ni
+// createdAt ni deletedAt. Sans ca, une restauration faite pour annuler une
+// erreur recente perdrait face a cette meme erreur au cycle de
+// synchronisation Drive suivant (voir syncOrchestrator.js) : la fusion garde
+// toujours l'enregistrement dont updatedAt est le plus recent, et une
+// sauvegarde plus ancienne a forcement des updatedAt plus anciens que
+// l'erreur qu'on cherche justement a annuler. En reestampillant tout a
+// "maintenant" (l'instant de la restauration, forcement plus recent que
+// l'erreur qu'on corrige), la restauration gagne la fusion au lieu d'etre
+// silencieusement ecrasee quelques minutes plus tard.
+function reestampiller(buffer, nomFichier, maintenant) {
+  let donnees;
+  try {
+    donnees = JSON.parse(buffer.toString("utf-8"));
+  } catch {
+    return buffer; // JSON illisible : on laisse tel quel plutot que de faire planter la restauration
+  }
+
+  // companies.json a une forme a part : { companies: [...], active_company_id }
+  if (nomFichier === "companies.json") {
+    if (!donnees || !Array.isArray(donnees.companies)) return buffer;
+    donnees.companies = donnees.companies.map((c) =>
+      c && typeof c === "object" ? { ...c, updatedAt: maintenant } : c
+    );
+    return Buffer.from(JSON.stringify(donnees, null, 2), "utf-8");
+  }
+
+  // clients.json / articles.json / invoices.json : simples tableaux
+  if (!Array.isArray(donnees)) return buffer;
+  const reestampillees = donnees.map((rec) => (rec && typeof rec === "object" ? { ...rec, updatedAt: maintenant } : rec));
+  return Buffer.from(JSON.stringify(reestampillees, null, 2), "utf-8");
+}
+
 /**
  * Restaure une archive ZIP de sauvegarde : copie d'abord les donnees
  * actuelles de cote par securite (au cas ou le mauvais fichier a ete
@@ -137,6 +178,9 @@ function importBackup(zipPath) {
   const check = inspectBackup(zipPath);
   if (!check.valid) throw new Error(check.error);
 
+  // Un seul instant pour toute la restauration : voir reestampiller()
+  // ci-dessus.
+  const maintenant = new Date().toISOString();
   const zip = new AdmZip(zipPath);
 
   fs.mkdirSync(userDataDir, { recursive: true });
@@ -160,7 +204,10 @@ function importBackup(zipPath) {
       if (!rel) continue;
       const dest = path.join(userDataDir, rel);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, entry.getData());
+      const contenu = SYNC_COLLECTION_FILES.has(rel)
+        ? reestampiller(entry.getData(), rel, maintenant)
+        : entry.getData();
+      fs.writeFileSync(dest, contenu);
       nbFichiersApp++;
     } else if (entry.entryName.startsWith("documents/Facturation/")) {
       const rel = entry.entryName.slice("documents/Facturation/".length);

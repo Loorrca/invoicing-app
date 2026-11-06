@@ -86,20 +86,47 @@ function getInvoice(id) {
   return invoices.find((f) => f.id === id) || null;
 }
 
+// Extrait le rang numerique d'un numero de facture, pour nextNumero()
+// ci-dessous. Deux formats reconnus : le format actuel "AAAANNN" (7
+// chiffres, annee + rang sur 3 chiffres — seuls les 3 derniers comptent,
+// ex. "2026003" -> 3) et l'ancien format a plat (ex. "0081" -> 81, repris
+// tel quel, sans annee encodee dedans). Un numero modifie a la main dans un
+// format different (cas particulier/correction, le champ reste editable)
+// n'est pas reconnu et renvoie null : il est alors simplement ignore pour
+// le calcul, plutot que de fausser le resultat.
+function rangDepuisNumero(numero) {
+  if (!numero) return null;
+  const s = String(numero).trim();
+  if (/^\d{7}$/.test(s)) return parseInt(s.slice(4), 10);
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  return null;
+}
+
 // Propose le prochain numero au format "AAAANNN" : l'annee en cours suivie
 // du rang de la facture dans cette annee pour cette entreprise (ex. 3e
 // facture de TEXBANNER en 2026 -> "2026003"). Le rang continue le compte des
 // factures deja emises cette annee-la (y compris celles au format precedent,
 // ex. "0081"), il ne repart jamais a 1 au moment du changement de format.
 // Le champ reste modifiable a la main si besoin (cas particulier, correction).
-// Une facture supprimee (tombstone) ne compte pas, comme avant l'ajout de la
-// suppression "douce" (son emplacement redevient disponible).
+//
+// Base sur le PLUS GRAND rang deja attribue cette annee-la, jamais sur un
+// simple compte des factures restantes : une facture supprimee (tombstone)
+// compte quand meme dans ce calcul, son numero reste definitivement reserve
+// et n'est jamais redistribue. Avant ce correctif, une facture supprimee ne
+// comptait pas du tout, ce qui "liberait" son numero — en supprimant une
+// facture ANCIENNE (ex. pour un probleme comptable), le compte diminuait et
+// la prochaine facture recevait un numero deja porte par une facture plus
+// recente toujours active : deux factures avec le meme numero.
 function nextNumero(companyId) {
   const annee = String(new Date().getFullYear());
-  const dejaCetteAnnee = invoices.filter(
-    (f) => f.companyId === companyId && !f.deletedAt && (f.date || "").slice(0, 4) === annee
-  ).length;
-  const rang = String(dejaCetteAnnee + 1).padStart(3, "0");
+  let dernierRang = 0;
+  for (const f of invoices) {
+    if (f.companyId !== companyId) continue;
+    if ((f.date || "").slice(0, 4) !== annee) continue;
+    const rang = rangDepuisNumero(f.numero);
+    if (rang !== null && rang > dernierRang) dernierRang = rang;
+  }
+  const rang = String(dernierRang + 1).padStart(3, "0");
   return `${annee}${rang}`;
 }
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import AppLock from "./components/AppLock.jsx";
 import Settings from "./pages/Settings.jsx";
 import NewInvoice from "./pages/NewInvoice.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
@@ -26,6 +27,16 @@ export default function App() {
   const [companies, setCompanies] = useState([]);
   const [activeCompany, setActiveCompanyState] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+  // null = statut pas encore connu (ecran vide le temps de demander a
+  // l'IPC) ; false = verrouille, en attente de la bonne saisie (voir
+  // AppLock.jsx) ; true = deverrouille (ou aucun mot de passe configure sur
+  // ce poste) - le reste de l'appli ne se monte qu'a ce moment-la, pour
+  // qu'aucune donnee ne soit chargee avant.
+  const [unlocked, setUnlocked] = useState(null);
+
+  useEffect(() => {
+    window.api.getLockStatus().then(({ hasPassword }) => setUnlocked(!hasPassword));
+  }, []);
 
   const refresh = useCallback(async () => {
     const [list, active] = await Promise.all([
@@ -37,8 +48,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (unlocked) refresh();
+  }, [unlocked, refresh]);
 
   async function handleSwitch(e) {
     const value = e.target.value;
@@ -51,6 +62,9 @@ export default function App() {
     await window.api.setActiveCompany(value);
     await refresh();
   }
+
+  if (unlocked === null) return null;
+  if (!unlocked) return <AppLock onUnlocked={() => setUnlocked(true)} />;
 
   return (
     <div className="app">

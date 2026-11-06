@@ -46,6 +46,56 @@ export default function Settings({ activeCompany, onSaved }) {
   const fileInputRef = useRef(null);
   const qrInputRef = useRef(null);
 
+  // Verrouillage de l'application (voir electron/lib/appLock.js et
+  // src/components/AppLock.jsx) : local a CE poste, independant de
+  // l'entreprise active - donc son propre etat, separe du formulaire
+  // ci-dessus.
+  const [lockHasPassword, setLockHasPassword] = useState(null); // null = pas encore charge
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockStatusMsg, setLockStatusMsg] = useState(null);
+
+  useEffect(() => {
+    window.api.getLockStatus().then(({ hasPassword }) => setLockHasPassword(hasPassword));
+  }, []);
+
+  async function handleSetPassword(e) {
+    e.preventDefault();
+    setLockStatusMsg(null);
+    if (!newPassword.trim()) return;
+    if (newPassword !== confirmPassword) {
+      setLockStatusMsg({ kind: "error", text: "Les deux saisies ne correspondent pas." });
+      return;
+    }
+    setLockBusy(true);
+    try {
+      const { hasPassword } = await window.api.setLockPassword(newPassword);
+      setLockHasPassword(hasPassword);
+      setNewPassword("");
+      setConfirmPassword("");
+      setLockStatusMsg({ kind: "ok", text: "Mot de passe enregistre." });
+    } catch (err) {
+      setLockStatusMsg({ kind: "error", text: String(err?.message || err) });
+    } finally {
+      setLockBusy(false);
+    }
+  }
+
+  async function handleRemovePassword() {
+    setLockStatusMsg(null);
+    setLockBusy(true);
+    try {
+      const { hasPassword } = await window.api.setLockPassword("");
+      setLockHasPassword(hasPassword);
+      setLockStatusMsg({ kind: "ok", text: "Protection retiree." });
+    } catch (err) {
+      setLockStatusMsg({ kind: "error", text: String(err?.message || err) });
+    } finally {
+      setLockBusy(false);
+    }
+  }
+
   // Recharge le formulaire a chaque changement d'entreprise active (via le
   // selecteur dans la barre laterale), pas seulement au premier montage.
   useEffect(() => {
@@ -255,6 +305,65 @@ export default function Settings({ activeCompany, onSaved }) {
           )}
         </div>
       </form>
+
+      <div className="card">
+        <h2 className="section-title">Verrouillage de l'application</h2>
+        <p className="field-hint">
+          Si un mot de passe est defini, il sera demande a chaque ouverture de l'application sur ce
+          poste. Propre a ce poste : il n'est pas synchronise avec l'autre ordinateur.
+        </p>
+
+        {lockHasPassword === null ? null : (
+          <>
+            {lockHasPassword && (
+              <p className="status ok" style={{ marginBottom: 10 }}>
+                Protection active sur ce poste.
+              </p>
+            )}
+
+            <form className="form" onSubmit={handleSetPassword}>
+              <div className="grid-2">
+                <label>
+                  {lockHasPassword ? "Nouveau mot de passe" : "Mot de passe"}
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Confirmer
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="actions">
+                <button type="submit" className="btn primary" disabled={lockBusy || !newPassword.trim()}>
+                  {lockHasPassword ? "Changer le mot de passe" : "Activer la protection"}
+                </button>
+                {lockHasPassword && (
+                  <button
+                    type="button"
+                    className="btn link"
+                    disabled={lockBusy}
+                    onClick={handleRemovePassword}
+                  >
+                    Retirer la protection
+                  </button>
+                )}
+                {lockStatusMsg && (
+                  <span className={lockStatusMsg.kind === "ok" ? "status ok" : "status error"}>
+                    {lockStatusMsg.text}
+                  </span>
+                )}
+              </div>
+            </form>
+          </>
+        )}
+      </div>
     </div>
   );
 }

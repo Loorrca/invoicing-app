@@ -27,6 +27,7 @@ const {
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
 const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch } = require("./payments");
 const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require("./backup");
+const { initLock, hasPassword, verifyPassword, setPassword } = require("./lib/appLock");
 const driveSync = require("./lib/driveSync");
 const { executerCycleDeSync, synchroniserFacturesAvantNumerotation } = require("./lib/syncOrchestrator");
 
@@ -333,6 +334,7 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
+  initLock(app.getPath("userData"));
   configurerSynchronisationDrive();
   demarrerSyncPeriodique();
   configurerAutoUpdater();
@@ -361,6 +363,18 @@ ipcMain.handle("companies:setActive", (_event, id) => setActiveCompany(id));
 ipcMain.handle("companies:saveActive", (_event, fields) => saveActiveCompany(fields));
 
 ipcMain.handle("companies:add", (_event, fields) => addCompany(fields));
+
+// --------------------------------------------------------------------------
+// IPC : verrouillage de l'application (voir electron/lib/appLock.js) - ecran
+// de mot de passe au demarrage, configure depuis Settings.jsx. Local a ce
+// poste, jamais synchronise entre postes.
+// --------------------------------------------------------------------------
+
+ipcMain.handle("lock:status", () => ({ hasPassword: hasPassword() }));
+
+ipcMain.handle("lock:unlock", (_event, password) => ({ ok: verifyPassword(password) }));
+
+ipcMain.handle("lock:setPassword", (_event, password) => setPassword(password));
 
 // --------------------------------------------------------------------------
 // IPC : catalogue d'articles
@@ -399,10 +413,33 @@ ipcMain.handle("invoices:get", (_event, id) => getInvoice(id));
 // factures depuis le dernier cycle periodique, on en tient compte plutot que
 // de risquer un numero deja pris. Echoue silencieusement si Drive n'est pas
 // joignable a cet instant (pas de cle configuree, reseau coupe, etc.).
+//
+// Cette synchro est un aller-retour reseau (quelques secondes), ce qui rend
+// l'onglet "Nouvelle facture" perceptiblement lent a l'ouverture si on
+// attend systematiquement dessus avant d'afficher quoi que ce soit (voir
+// invoices:nextNumeroLocal juste en dessous, qui repond instantanement avec
+// les donnees locales pour un premier affichage, pendant que celle-ci tourne
+// en arriere-plan et vient corriger le champ si besoin une fois revenue).
 ipcMain.handle("invoices:nextNumero", async () => {
   await synchroniserFacturesAvantNumerotation();
   return nextNumero(getActiveCompany().id);
 });
+
+// Meme calcul que ci-dessus, mais sans la synchro Drive prealable : lit
+// uniquement l'etat local deja en memoire, repond donc immediatement. Sert
+// au premier affichage du numero propose (ouverture de l'onglet "Nouvelle
+// facture", ou juste apres l'enregistrement d'une facture) pour que le champ
+// ne reste jamais plusieurs secondes sur son texte d'exemple (le placeholder
+// "2026001" de l'input, qui n'est qu'un indice de format et pas une vraie
+// proposition) — invoices:nextNumero (avec sa synchro) reste appele juste
+// derriere pour corriger silencieusement le champ si une autre machine a
+// emis une facture entretemps. Ca ne protege que la PROPOSITION affichee :
+// invoice:generatePdf (l'enregistrement reel) n'appelle aucune des deux, il
+// prend tel quel le numero present dans le champ au moment du clic et se
+// contente de refuser un doublon deja present localement. Mieux vaut donc
+// enregistrer peu de temps apres l'ouverture de l'onglet qu'apres l'avoir
+// laisse ouvert longtemps.
+ipcMain.handle("invoices:nextNumeroLocal", () => nextNumero(getActiveCompany().id));
 
 ipcMain.handle("invoices:delete", (_event, id) => {
   const record = getInvoice(id);

@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld("api", {
   setActiveCompany: (id) => ipcRenderer.invoke("companies:setActive", id),
   saveActiveCompany: (fields) => ipcRenderer.invoke("companies:saveActive", fields),
   addCompany: (fields) => ipcRenderer.invoke("companies:add", fields),
+  getLockStatus: () => ipcRenderer.invoke("lock:status"),
+  unlockApp: (password) => ipcRenderer.invoke("lock:unlock", password),
+  setLockPassword: (password) => ipcRenderer.invoke("lock:setPassword", password),
   listArticles: () => ipcRenderer.invoke("articles:list"),
   addArticle: (fields) => ipcRenderer.invoke("articles:add", fields),
   updateArticle: (id, fields) => ipcRenderer.invoke("articles:update", { id, fields }),
@@ -19,6 +22,10 @@ contextBridge.exposeInMainWorld("api", {
   listInvoices: () => ipcRenderer.invoke("invoices:list"),
   getInvoiceRecord: (id) => ipcRenderer.invoke("invoices:get", id),
   getNextNumero: () => ipcRenderer.invoke("invoices:nextNumero"),
+  // Variante instantanee (donnees locales uniquement, pas de synchronisation
+  // Drive avant de repondre) : voir le commentaire sur invoices:nextNumeroLocal
+  // dans main.js pour pourquoi les deux existent.
+  getNextNumeroLocal: () => ipcRenderer.invoke("invoices:nextNumeroLocal"),
   deleteInvoiceRecord: (id) => ipcRenderer.invoke("invoices:delete", id),
   generateInvoicePdf: (invoice) => ipcRenderer.invoke("invoice:generatePdf", invoice),
   updateAndSaveInvoice: (id, invoice) => ipcRenderer.invoke("invoice:updateAndSave", { id, invoice }),

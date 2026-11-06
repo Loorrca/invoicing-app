@@ -122,18 +122,71 @@ function sontEquivalents(a, b) {
   return eq ? eq.has(b) : false;
 }
 
+// Squelette du nom ENTIER : tous les mots mis bout a bout, SANS le filtre de
+// longueur minimale par mot de squelettesMots ci-dessus. Secours pour
+// correspondTranslitteration juste en dessous, pour un cas que la
+// comparaison mot-par-mot ne peut pas resoudre : certains noms de lieux se
+// reduisent, mot par mot, a UNE SEULE consonne chacun une fois les voyelles
+// retirees (ex. "وادي الليل", Oued Ellil -> "وادي"="d", "الليل"="l" : les
+// deux sont rejetes par squelettesMots, trop courts seuls pour etre
+// consideres specifiques). Mis bout a bout ("dl"), et compare au meme
+// squelette "nom entier" cote client (lui aussi "...dl" une fois les mots
+// administratifs traverses), la correspondance redevient possible — et
+// absorbe au passage les differences de decoupage en mots d'une graphie a
+// l'autre ("oued ellil" en deux mots, "wedellil" en un seul, "wad alil",
+// "ouad alil"... donnent tous "dl").
+//
+// Volontairement SANS liste de mots a exclure ici (contrairement a
+// l'ancienne version envisagee) : exclure un mot via le squelette d'une
+// liste "mots administratifs" est fragile, deux mots sans aucun rapport
+// pouvant se reduire au meme squelette tres court ("wilaya" et "العالي"
+// donnent tous les deux "l") et en excluant l'un on exclurait l'autre par
+// erreur. Le residu generique que ca laisse parfois (ex. un mot administratif
+// qui termine coincidentellement par le meme squelette court) est accepte :
+// cette fonction est un filtre de recherche pour un humain, pas un
+// rapprochement automatique — quelques resultats en plus dans la liste ne
+// genent pas, rater le bon resultat si.
+function squeletteComplet(texte) {
+  if (!texte) return "";
+  const mots = texte.split(/[^\w؀-ۿ]+/).filter(Boolean);
+  let out = "";
+  for (const mot of mots) {
+    if (/^\d+$/.test(mot)) continue;
+    out += squelette(mot);
+  }
+  return out;
+}
+
 /** Le nom du client correspond-il a la requete tapee (eventuellement en
  *  graphie differente, voire en traduction pour les mots administratifs
  *  courants) ? Chaque mot de la requete doit se retrouver dans au moins un
  *  mot du nom, pour un resultat qui se met a jour au fur et a mesure de la
  *  frappe, comme une recherche normale. Une requete vide correspond a tout
- *  (coherent avec le filtre existant). */
+ *  (coherent avec le filtre existant).
+ *
+ *  Si cette comparaison mot-par-mot echoue, on retente avec squeletteComplet
+ *  ci-dessus (voir son commentaire) avant de conclure a l'absence de
+ *  correspondance — important : une requete qui ne produit AUCUN mot
+ *  "squelettable" par squelettesMots (ex. "oued ellil", dont les deux mots
+ *  sont individuellement trop courts) n'est PAS la meme chose qu'une requete
+ *  vide, et ne doit donc pas etre traitee comme "tout correspond". */
 export function correspondTranslitteration(nomClient, requete) {
-  const motsRequete = squelettesMots(requete);
-  if (motsRequete.length === 0) return true;
+  const texteRequete = (requete || "").trim();
+  if (!texteRequete) return true;
+
+  const motsRequete = squelettesMots(texteRequete);
   const motsClient = squelettesMots(nomClient);
-  if (motsClient.length === 0) return false;
-  return motsRequete.every((mr) => motsClient.some((mc) => sontEquivalents(mc, mr)));
+  if (
+    motsRequete.length > 0 &&
+    motsClient.length > 0 &&
+    motsRequete.every((mr) => motsClient.some((mc) => sontEquivalents(mc, mr)))
+  ) {
+    return true;
+  }
+
+  const residu = squeletteComplet(texteRequete);
+  if (residu.length < 2) return false; // trop court pour etre specifique
+  return squeletteComplet(nomClient).includes(residu);
 }
 
 // Un sigle comme "O.N.P.F.T" est fait de lettres isolees separees par des

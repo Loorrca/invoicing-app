@@ -180,12 +180,31 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
         })
         .catch(() => setLoadingRecord(false));
     } else {
+      // Deux temps : d'abord la proposition locale (instantanee, sans
+      // attendre de synchro Drive) pour que le champ ne reste jamais
+      // plusieurs secondes sur son placeholder d'exemple, puis la
+      // proposition "officielle" (avec synchro, voir main.js) qui vient la
+      // corriger silencieusement en arriere-plan si une autre machine a
+      // emis une facture entretemps. Ne corrige que si l'utilisateur n'a
+      // pas deja modifie le champ lui-meme pendant l'attente.
+      let numeroLocalPropose = null;
       window.api
-        .getNextNumero()
+        .getNextNumeroLocal()
         .then((suggested) => {
-          if (suggested) setNumero(suggested);
+          if (suggested) {
+            numeroLocalPropose = suggested;
+            setNumero(suggested);
+          }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          window.api
+            .getNextNumero()
+            .then((suggested) => {
+              if (suggested) setNumero((actuel) => (actuel === numeroLocalPropose ? suggested : actuel));
+            })
+            .catch(() => {});
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
@@ -375,12 +394,25 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
           // Nouvelle facture generee : on repart directement sur une facture
           // vierge, avec le numero suivant propose automatiquement.
           resetFields();
+          // Meme logique en deux temps que l'effet d'ouverture d'onglet
+          // ci-dessus : proposition locale immediate, puis correction
+          // silencieuse en arriere-plan une fois la synchro revenue.
+          let numeroLocalPropose = null;
           try {
-            const suggested = await window.api.getNextNumero();
-            if (suggested) setNumero(suggested);
+            const suggestedLocal = await window.api.getNextNumeroLocal();
+            if (suggestedLocal) {
+              numeroLocalPropose = suggestedLocal;
+              setNumero(suggestedLocal);
+            }
           } catch {
             // Au pire, l'utilisateur garde l'ancien numero et le corrige a la main.
           }
+          window.api
+            .getNextNumero()
+            .then((suggested) => {
+              if (suggested) setNumero((actuel) => (actuel === numeroLocalPropose ? suggested : actuel));
+            })
+            .catch(() => {});
         }
         onSaved?.();
       }

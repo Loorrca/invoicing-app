@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { nomClient, codeClient } from "../utils/clientDisplay.js";
+import { correspondTranslitteration } from "../utils/translitteration.js";
 
 function fmt(n) {
   return Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -124,7 +125,11 @@ export default function InvoicesList({ onEdit }) {
           q &&
           !(f.numero || "").toLowerCase().includes(q) &&
           !nomClient(f.client).toLowerCase().includes(q) &&
-          !codeClient(f.client).toLowerCase().includes(q)
+          !codeClient(f.client).toLowerCase().includes(q) &&
+          // Recherche translitteree sur le nom du client (meme logique que
+          // l'onglet Clients) : retrouve "بلدية وادي الليل" en tapant "oued
+          // ellil", "wedellil", "wad alil", etc.
+          !correspondTranslitteration(nomClient(f.client), query)
         ) {
           return false;
         }

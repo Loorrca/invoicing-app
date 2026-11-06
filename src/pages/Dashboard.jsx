@@ -201,12 +201,16 @@ function StatTile({ label, value, subValue, delta }) {
 
 export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauvegarde }) {
   const [invoices, setInvoices] = useState([]);
+  const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [paiements, setPaiements] = useState(null);
   const [backupInfo, setBackupInfo] = useState(null);
   const [backupExporting, setBackupExporting] = useState(false);
   const [backupMsg, setBackupMsg] = useState(null);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  // HT ou TTC pour le graphique d'evolution uniquement (les autres cartes
+  // monetaires du tableau de bord sont toutes en TTC, voir stats ci-dessous).
+  const [evolutionMode, setEvolutionMode] = useState("ttc");
 
   // Annees proposees dans le selecteur : celles qui ont au moins une
   // facture, plus l'annee civile en cours (meme vide, ex. le 1er janvier,
@@ -235,6 +239,10 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       })
       .catch(() => setLoading(false));
     window.api
+      .listArticles()
+      .then(setArticles)
+      .catch(() => setArticles([]));
+    window.api
       .scanPayments()
       .then((res) => setPaiements(res?.ok ? res : null))
       .catch(() => setPaiements(null));
@@ -243,6 +251,19 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       .then(setBackupInfo)
       .catch(() => setBackupInfo(null));
   }, []);
+
+  // Catalogue actuel indexe par code (en minuscules) : meme logique que
+  // Productions.jsx, pour retrouver le nom par defaut a jour d'un article a
+  // partir de son code, meme si telle ou telle facture porte un libelle
+  // retouche.
+  const articleByCode = useMemo(() => {
+    const map = new Map();
+    for (const a of articles) {
+      const code = (a.code || "").trim().toLowerCase();
+      if (code) map.set(code, a);
+    }
+    return map;
+  }, [articles]);
 
   // Sauvegarde complète (toutes entreprises) en un clic depuis le tableau de
   // bord — même action que l'onglet Sauvegarde (voir Sauvegarde.jsx).
@@ -293,12 +314,30 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       }
 
       const client = nomClient(f.client).trim();
-      if (client) clientTotals.set(client, (clientTotals.get(client) || 0) + ht);
+      if (client) clientTotals.set(client, (clientTotals.get(client) || 0) + ttc);
 
+      // Regroupe par CODE article (comme Productions.jsx), pas par
+      // designation : la designation d'une ligne de facture est librement
+      // retouchee facture par facture (voir NewInvoice.jsx), donc deux
+      // factures du meme article avec un libelle legerement different
+      // comptaient avant comme deux entrees separees dans ce top 5. Secours
+      // sur la designation pour les anciennes lignes sans code.
       for (const l of f.lignes || []) {
-        const designation = (l.designation || "").trim();
-        if (!designation) continue;
-        productTotals.set(designation, (productTotals.get(designation) || 0) + (Number(l.quantite) || 0));
+        const code = (l.code || "").trim();
+        const designationLigne = (l.designation || "").trim();
+        if (!code && !designationLigne) continue;
+        const qty = Number(l.quantite) || 0;
+        const key = code ? `code:${code.toLowerCase()}` : `nom:${designationLigne.toLowerCase()}`;
+        const existing = productTotals.get(key);
+        if (existing) {
+          existing.quantite += qty;
+        } else {
+          const catalogue = code ? articleByCode.get(code.toLowerCase()) : null;
+          productTotals.set(key, {
+            designation: catalogue ? catalogue.designation : designationLigne,
+            quantite: qty,
+          });
+        }
       }
     }
 
@@ -309,7 +348,11 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
     const months = [];
     const moisTva = [];
     for (let idx = yearStartIdx; idx < yearStartIdx + 12; idx++) {
-      months.push({ label: ymLabel(idx), value: monthTotals.get(idx) || 0 });
+      months.push({
+        label: ymLabel(idx),
+        ht: monthTotals.get(idx) || 0,
+        ttc: monthTotalsTtc.get(idx) || 0,
+      });
       moisTva.push({
         idx,
         label: ymLabel(idx),
@@ -330,22 +373,30 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
 
     let thisMonthHT = null;
     let prevMonthHT = null;
+    let thisMonthTTC = null;
+    let prevMonthTTC = null;
     let thisMonthTVA = null;
     let delta = null;
     if (estAnneeEnCours) {
       thisMonthHT = 0;
       prevMonthHT = 0;
+      thisMonthTTC = 0;
+      prevMonthTTC = 0;
       thisMonthTVA = 0;
       for (const f of invoices) {
         const idx = ymIndex(f.date);
         if (idx === nowIdx) {
           thisMonthHT += f.totaux?.ht || 0;
+          thisMonthTTC += f.totaux?.ttc || 0;
           thisMonthTVA += f.totaux?.tva || 0;
         } else if (idx === nowIdx - 1) {
           prevMonthHT += f.totaux?.ht || 0;
+          prevMonthTTC += f.totaux?.ttc || 0;
         }
       }
-      delta = prevMonthHT > 0 ? ((thisMonthHT - prevMonthHT) / prevMonthHT) * 100 : null;
+      // Base TTC (pas HT) : coherent avec le reste du tableau de bord, qui
+      // affiche desormais le TTC en grandeur principale partout.
+      delta = prevMonthTTC > 0 ? ((thisMonthTTC - prevMonthTTC) / prevMonthTTC) * 100 : null;
     }
 
     const topClients = [...clientTotals.entries()]
@@ -353,8 +404,8 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    const topProducts = [...productTotals.entries()]
-      .map(([label, value]) => ({ label, value }))
+    const topProducts = [...productTotals.values()]
+      .map((p) => ({ label: p.designation, value: p.quantite }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
@@ -367,12 +418,21 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       moisTva,
       thisMonthHT,
       prevMonthHT,
+      thisMonthTTC,
+      prevMonthTTC,
       delta,
       topClients,
       topProducts,
       estAnneeEnCours,
     };
-  }, [invoices, yearInvoices, selectedYear]);
+  }, [invoices, yearInvoices, selectedYear, articleByCode]);
+
+  // Donnees du graphique d'evolution selon le mode choisi dans le selecteur
+  // HT/TTC (stats.months garde toujours les deux, voir ci-dessus).
+  const evolutionMonths = useMemo(
+    () => stats.months.map((m) => ({ label: m.label, value: evolutionMode === "ttc" ? m.ttc : m.ht })),
+    [stats.months, evolutionMode]
+  );
 
   // "Suivi des paiements" du tableau de bord, scope a l'annee choisie : on
   // reutilise les lignes deja rapprochees par scanPayments() (meme appel,
@@ -442,21 +502,32 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
         <>
           <div className="kpi-row">
             <StatTile
-              label={`Chiffre d'affaires ${selectedYear} (HT)`}
-              value={fmtMoney(stats.totalHT)}
-              subValue={`TTC : ${fmtMoney(stats.totalTTC)}`}
+              label={`Chiffre d'affaires ${selectedYear} (TTC)`}
+              value={fmtMoney(stats.totalTTC)}
+              subValue={`HT : ${fmtMoney(stats.totalHT)}`}
             />
             {stats.estAnneeEnCours && (
               <>
-                <StatTile label="Ce mois-ci (HT)" value={fmtMoney(stats.thisMonthHT)} delta={stats.delta} />
-                <StatTile label="Mois precedent (HT)" value={fmtMoney(stats.prevMonthHT)} />
+                <StatTile label="Ce mois-ci (TTC)" value={fmtMoney(stats.thisMonthTTC)} delta={stats.delta} />
+                <StatTile label="Mois precedent (TTC)" value={fmtMoney(stats.prevMonthTTC)} />
               </>
             )}
           </div>
 
           <div className="card">
-            <h2 className="section-title">Evolution du chiffre d'affaires (HT) — {selectedYear}</h2>
-            <EvolutionChart months={stats.months} />
+            <div className="dashboard-card-header">
+              <h2 className="section-title">
+                Evolution du chiffre d'affaires ({evolutionMode === "ttc" ? "TTC" : "HT"}) — {selectedYear}
+              </h2>
+              <label className="dashboard-year-select">
+                Afficher en
+                <select value={evolutionMode} onChange={(e) => setEvolutionMode(e.target.value)}>
+                  <option value="ttc">TTC</option>
+                  <option value="ht">HT</option>
+                </select>
+              </label>
+            </div>
+            <EvolutionChart months={evolutionMonths} />
           </div>
 
           <div className="card">
@@ -513,7 +584,7 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
 
           <div className="grid-2 dashboard-grid">
             <div className="card">
-              <h2 className="section-title">Top clients (HT) — {selectedYear}</h2>
+              <h2 className="section-title">Top clients (TTC) — {selectedYear}</h2>
               {stats.topClients.length ? (
                 <HorizontalBars data={stats.topClients} formatValue={fmtMoney} />
               ) : (

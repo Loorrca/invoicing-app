@@ -109,19 +109,22 @@ function rangDepuisNumero(numero) {
 // ex. "0081"), il ne repart jamais a 1 au moment du changement de format.
 // Le champ reste modifiable a la main si besoin (cas particulier, correction).
 //
-// Base sur le PLUS GRAND rang deja attribue cette annee-la, jamais sur un
-// simple compte des factures restantes : une facture supprimee (tombstone)
-// compte quand meme dans ce calcul, son numero reste definitivement reserve
-// et n'est jamais redistribue. Avant ce correctif, une facture supprimee ne
-// comptait pas du tout, ce qui "liberait" son numero — en supprimant une
-// facture ANCIENNE (ex. pour un probleme comptable), le compte diminuait et
-// la prochaine facture recevait un numero deja porte par une facture plus
-// recente toujours active : deux factures avec le meme numero.
+// Base sur le PLUS GRAND rang parmi les factures NON supprimees cette
+// annee-la (`!f.deletedAt` ci-dessous) — demande explicite de l'utilisateur :
+// supprimer la DERNIERE facture emise libere son numero pour la suivante
+// (ex. supprimer 2026110 fait repartir la proposition sur 2026110, pas
+// 2026111), mais supprimer une facture au milieu de la sequence ne change
+// rien, puisque le MAX parmi les survivantes reste le meme (pas de
+// recalcul en cascade des numeros suivants, seul le plus grand numero
+// compte). Une facture supprimee puis son numero reattribue a une nouvelle
+// facture ne pose pas de probleme : la premiere reste un tombstone, seule
+// la seconde est active.
 function nextNumero(companyId) {
   const annee = String(new Date().getFullYear());
   let dernierRang = 0;
   for (const f of invoices) {
     if (f.companyId !== companyId) continue;
+    if (f.deletedAt) continue;
     if ((f.date || "").slice(0, 4) !== annee) continue;
     const rang = rangDepuisNumero(f.numero);
     if (rang !== null && rang > dernierRang) dernierRang = rang;

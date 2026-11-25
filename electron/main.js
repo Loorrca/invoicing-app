@@ -25,11 +25,37 @@ const {
   deleteInvoice,
 } = require("./invoices");
 const { renderInvoiceHtml, calculerTotaux } = require("./lib/invoiceTemplate");
+const {
+  initBonsLivraison,
+  listBonsLivraison,
+  getBonLivraison,
+  nextNumero: nextNumeroBonLivraison,
+  addBonLivraison,
+  updateBonLivraison,
+  deleteBonLivraison,
+  marquerFactures: marquerBonsLivraisonFactures,
+  delierFacture: delierBonsLivraisonDeFacture,
+} = require("./bonsLivraison");
+const { renderBonLivraisonHtml } = require("./lib/bonLivraisonTemplate");
+const {
+  initStock,
+  listArticlesSuivis,
+  toutesLesQuantites,
+  suivreArticle,
+  retirerSuivi,
+  ajusterManuellement,
+  appliquerMouvementsPourLignes,
+  annulerMouvementsPourSource,
+} = require("./stock");
 const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch } = require("./payments");
 const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require("./backup");
 const { initLock, hasPassword, verifyPassword, setPassword } = require("./lib/appLock");
 const driveSync = require("./lib/driveSync");
-const { executerCycleDeSync, synchroniserFacturesAvantNumerotation } = require("./lib/syncOrchestrator");
+const {
+  executerCycleDeSync,
+  synchroniserFacturesAvantNumerotation,
+  synchroniserBonsLivraisonAvantNumerotation,
+} = require("./lib/syncOrchestrator");
 
 // Optionnel : si le module n'est pas installe (npm install manquant), on se
 // contente de ne pas numeroter les pages plutot que de planter l'appli.
@@ -332,6 +358,8 @@ app.whenReady().then(() => {
   initArticles(app.getPath("userData"), listCompanies().map((c) => c.id));
   initClients(app.getPath("userData"));
   initInvoices(app.getPath("userData"));
+  initBonsLivraison(app.getPath("userData"));
+  initStock(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
   initLock(app.getPath("userData"));
@@ -387,6 +415,41 @@ ipcMain.handle("articles:add", (_event, fields) => addArticle(getActiveCompany()
 ipcMain.handle("articles:update", (_event, { id, fields }) => updateArticle(id, fields));
 
 ipcMain.handle("articles:delete", (_event, id) => deleteArticle(id));
+
+// --------------------------------------------------------------------------
+// IPC : suivi de stock (voir electron/stock.js) - commun aux deux
+// entreprises, indexe par code article (pas de companyId).
+// --------------------------------------------------------------------------
+
+// Liste des articles suivis + leur quantite actuelle (somme des mouvements),
+// pour l'affichage de l'onglet Stock.
+ipcMain.handle("stock:list", () => {
+  const quantites = toutesLesQuantites();
+  return listArticlesSuivis().map((a) => ({ ...a, quantite: quantites.get(a.code) || 0 }));
+});
+
+// Catalogue fusionne (deduplique par code) des articles des DEUX
+// entreprises, pour le selecteur "Ajouter un article a suivre" - un meme
+// code peut exister dans les deux catalogues, on ne le propose qu'une fois.
+ipcMain.handle("stock:catalogueArticles", () => {
+  const vu = new Map();
+  for (const company of listCompanies()) {
+    for (const article of listArticles(company.id)) {
+      const code = String(article.code || "").trim();
+      if (!code || vu.has(code)) continue;
+      vu.set(code, { code, designation: article.designation || "" });
+    }
+  }
+  return [...vu.values()].sort((a, b) => a.code.localeCompare(b.code, "fr", { numeric: true }));
+});
+
+ipcMain.handle("stock:suivreArticle", (_event, fields) => suivreArticle(fields));
+
+ipcMain.handle("stock:retirerSuivi", (_event, code) => retirerSuivi(code));
+
+ipcMain.handle("stock:ajusterManuellement", (_event, { code, nouvelleQuantite }) =>
+  ajusterManuellement(code, nouvelleQuantite)
+);
 
 // --------------------------------------------------------------------------
 // IPC : catalogue de clients
@@ -450,9 +513,66 @@ ipcMain.handle("invoices:delete", (_event, id) => {
       // fichier deja absent ou deplace : on retire quand meme l'entree
     }
   }
+  // Delie les bons de livraison a l'origine de cette facture (voir
+  // "Creer la facture" dans BonsLivraison.jsx) : supprimer la facture doit
+  // rendre ces bons de nouveau selectionnables pour une nouvelle facture,
+  // plutot que de les laisser marques "facturés" vers une facture qui
+  // n'existe plus.
+  delierBonsLivraisonDeFacture(id);
+  // Si cette facture avait deduit du stock directement (voir
+  // invoice:generatePdf : seules les factures SANS bon de livraison
+  // d'origine deduisent) ne touche a rien pour une facture issue de bons de
+  // livraison, deja deduite a leur niveau.
+  annulerMouvementsPourSource("invoice", id);
   deleteInvoice(id);
   return true;
 });
+
+// --------------------------------------------------------------------------
+// IPC : historique des bons de livraison (voir electron/bonsLivraison.js) -
+// memes principes que les factures ci-dessus (numerotation separee, synchro
+// avant numerotation, proposition locale instantanee puis correction), mais
+// sans aucun prix/total : un bon de livraison n'est qu'une preuve de
+// livraison, jamais un document fiscal.
+// --------------------------------------------------------------------------
+
+ipcMain.handle("bonsLivraison:list", () => listBonsLivraison(getActiveCompany().id));
+
+ipcMain.handle("bonsLivraison:get", (_event, id) => getBonLivraison(id));
+
+ipcMain.handle("bonsLivraison:nextNumero", async () => {
+  await synchroniserBonsLivraisonAvantNumerotation();
+  return nextNumeroBonLivraison(getActiveCompany().id);
+});
+
+ipcMain.handle("bonsLivraison:nextNumeroLocal", () => nextNumeroBonLivraison(getActiveCompany().id));
+
+ipcMain.handle("bonsLivraison:delete", (_event, id) => {
+  const record = getBonLivraison(id);
+  if (record?.filePath) {
+    try {
+      fs.unlinkSync(record.filePath);
+    } catch {
+      // fichier deja absent ou deplace : on retire quand meme l'entree
+    }
+  }
+  // Un bon de livraison deduit TOUJOURS le stock a sa creation (voir
+  // bonLivraison:generatePdf) : sa suppression reaccredite systematiquement
+  // ce qui avait ete deduit.
+  annulerMouvementsPourSource("bonLivraison", id);
+  deleteBonLivraison(id);
+  return true;
+});
+
+// Marque un ou plusieurs bons de livraison comme factures (voir
+// NewInvoice.jsx : "Creer la facture" depuis l'onglet Bons de livraison).
+// Purement declaratif cote donnees (n'affecte ni le PDF deja genere du bon de
+// livraison, ni son numero) : sert seulement a afficher "Facture" en face de
+// ces bons de livraison et a empecher de les refacturer une deuxieme fois
+// par erreur.
+ipcMain.handle("bonsLivraison:marquerFactures", (_event, { ids, factureId, factureNumero }) =>
+  marquerBonsLivraisonFactures(ids, factureId, factureNumero)
+);
 
 // --------------------------------------------------------------------------
 // IPC : generation de facture PDF
@@ -486,6 +606,23 @@ function invoicesDirFor(company) {
 
 function invoiceFilePath(company, numero) {
   return path.join(invoicesDirFor(company), `facture-${sanitizeForPath(numero || "brouillon")}.pdf`);
+}
+
+// Meme rangement que les factures ci-dessus, dans un sous-dossier separe
+// ("Bons de livraison" plutot que "Factures") pour ne jamais les melanger.
+function bonsLivraisonDirFor(company) {
+  const dir = path.join(
+    dossierFacturationBase(),
+    "Facturation",
+    "Bons de livraison",
+    sanitizeForPath(company.company_name)
+  );
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function bonLivraisonFilePath(company, numero) {
+  return path.join(bonsLivraisonDirFor(company), `bon-livraison-${sanitizeForPath(numero || "brouillon")}.pdf`);
 }
 
 // Largeur de la zone imprimable en px CSS (A4 210mm - marges gauche/droite
@@ -529,9 +666,22 @@ async function remplirEspaceRestant(win) {
           if (!derniereVide) break; // plus de ligne vide a retirer : on laisse deborder sur une 2e page
           tbody.removeChild(derniereVide);
         }
+        // Construit la ligne vide a partir des colonnes REELLES du tableau
+        // (entete <thead><th>...</th></thead>), plutot que de supposer les 5
+        // colonnes de la facture (code/designation/qte/p.u./total) : un bon
+        // de livraison n'a que 3 colonnes (code/designation/quantite), donc
+        // une ligne vide a 5 <td> y cassait l'alignement des colonnes
+        // (table-layout:fixed deduit les largeurs de la premiere ligne
+        // venue, vide ou pas) et rendait le tableau visiblement asymetrique.
+        var thsEntete = document.querySelectorAll("table.lignes thead th");
         var ligneVideHtml =
-          '<tr><td class="code">&nbsp;</td><td class="designation">&nbsp;</td>' +
-          '<td class="num">&nbsp;</td><td class="num">&nbsp;</td><td class="num">&nbsp;</td></tr>';
+          "<tr>" +
+          Array.prototype.map
+            .call(thsEntete, function (th) {
+              return '<td class="' + (th.className || "") + '">&nbsp;</td>';
+            })
+            .join("") +
+          "</tr>";
         var ajoutees = 0;
         for (var i = 0; i < 60; i++) {
           tbody.insertAdjacentHTML("beforeend", ligneVideHtml);
@@ -650,6 +800,21 @@ ipcMain.handle("invoice:generatePdf", async (_event, invoice) => {
     filePath,
   });
 
+  // Deduit le stock directement a la facture UNIQUEMENT si elle n'a pas ete
+  // creee a partir de bon(s) de livraison deja selectionnes (voir
+  // BonsLivraison.jsx "Creer la facture" / NewInvoice.jsx
+  // bonsLivraisonSourceIds) - dans ce cas la deduction a deja eu lieu au
+  // moment de la generation de ces bons, et la refaire ici compterait la
+  // meme sortie de stock deux fois. Une facture "libre" (sans bon de
+  // livraison d'origine) est le seul cas ou rien n'a encore ete deduit.
+  if (!invoice.bonsLivraisonSourceIds || invoice.bonsLivraisonSourceIds.length === 0) {
+    appliquerMouvementsPourLignes(invoice.lignes, {
+      source: "invoice",
+      sourceId: record.id,
+      sourceNumero: record.numero,
+    });
+  }
+
   return { canceled: false, filePath, id: record.id };
 });
 
@@ -704,6 +869,21 @@ ipcMain.handle("invoice:updateAndSave", async (_event, { id, invoice }) => {
     company,
     filePath: newFilePath,
   });
+
+  // Reconcilie le stock avec les nouvelles lignes : annule d'abord tout ce
+  // qui avait ete deduit pour CETTE facture (solde net, voir
+  // annulerMouvementsPourSource), puis ne reapplique une deduction que si
+  // cette annulation a trouve quelque chose a annuler - une facture issue de
+  // bons de livraison n'a jamais rien deduit elle-meme (annulerMouvementsPourSource
+  // renvoie false sans rien faire) et doit le rester meme apres modification.
+  const avaitDeduit = annulerMouvementsPourSource("invoice", id);
+  if (avaitDeduit) {
+    appliquerMouvementsPourLignes(invoice.lignes, {
+      source: "invoice",
+      sourceId: id,
+      sourceNumero: invoice.numero,
+    });
+  }
 
   return { canceled: false, filePath: newFilePath, id: record.id };
 });
@@ -844,6 +1024,184 @@ ipcMain.handle("invoice:print", async (_event, id) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       title: "Aucune imprimante detectee — enregistrer en PDF",
       defaultPath: `facture-${sanitizeForPath(record.numero || "brouillon")}.pdf`,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+
+    let pdfBuffer = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: "A4",
+      margins: { marginType: "none" },
+    });
+    pdfBuffer = await ajouterNumerosDePage(pdfBuffer);
+    fs.writeFileSync(result.filePath, pdfBuffer);
+    return { ok: true, saved: true, filePath: result.filePath };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  } finally {
+    printWindow.destroy();
+  }
+});
+
+// --------------------------------------------------------------------------
+// IPC : generation de bon de livraison PDF (voir electron/bonsLivraison.js et
+// electron/lib/bonLivraisonTemplate.js) - meme mecanique que les factures
+// ci-dessus (writePdfToFile/ajouterNumerosDePage/remplirEspaceRestant sont
+// deja generiques, reutilises tels quels), simplement sans prix ni total.
+// --------------------------------------------------------------------------
+
+ipcMain.handle("bonLivraison:generatePdf", async (_event, bonLivraison) => {
+  const company = getActiveCompany();
+  const numero = String(bonLivraison.numero || "").trim();
+
+  const duplicate = listBonsLivraison(company.id).find((b) => (b.numero || "").trim() === numero);
+  if (duplicate) {
+    return {
+      canceled: true,
+      error: `Le numero ${numero || "(vide)"} existe deja pour cette entreprise. Modifiez ce bon de livraison depuis l'onglet Bons de livraison, ou choisissez un autre numero.`,
+    };
+  }
+
+  const html = renderBonLivraisonHtml(company, bonLivraison);
+  const filePath = bonLivraisonFilePath(company, bonLivraison.numero);
+  await writePdfToFile(html, filePath);
+
+  const record = addBonLivraison({
+    companyId: company.id,
+    numero: bonLivraison.numero,
+    date: bonLivraison.date,
+    client: bonLivraison.client,
+    bonCommande: bonLivraison.bonCommande,
+    lignes: bonLivraison.lignes,
+    company,
+    filePath,
+  });
+
+  // Un bon de livraison represente la sortie physique reelle de
+  // marchandise : il deduit TOUJOURS le stock des codes suivis, sans
+  // condition (contrairement a la facture, qui ne deduit que si elle n'a pas
+  // deja ete deduite via un bon de livraison).
+  appliquerMouvementsPourLignes(bonLivraison.lignes, {
+    source: "bonLivraison",
+    sourceId: record.id,
+    sourceNumero: record.numero,
+  });
+
+  return { canceled: false, filePath, id: record.id };
+});
+
+ipcMain.handle("bonLivraison:updateAndSave", async (_event, { id, bonLivraison }) => {
+  const existing = getBonLivraison(id);
+  if (!existing) return { canceled: true, error: "Bon de livraison introuvable" };
+
+  const company = getActiveCompany();
+  const numero = String(bonLivraison.numero || "").trim();
+
+  const duplicate = listBonsLivraison(company.id).find((b) => b.id !== id && (b.numero || "").trim() === numero);
+  if (duplicate) {
+    return { canceled: true, error: `Le numero ${numero || "(vide)"} est deja utilise par un autre bon de livraison.` };
+  }
+
+  const html = renderBonLivraisonHtml(company, bonLivraison);
+  const newFilePath = bonLivraisonFilePath(company, bonLivraison.numero);
+  await writePdfToFile(html, newFilePath);
+
+  if (existing.filePath && existing.filePath !== newFilePath) {
+    try {
+      fs.unlinkSync(existing.filePath);
+    } catch {
+      // ancien fichier deja absent : rien a faire
+    }
+  }
+
+  const record = updateBonLivraison(id, {
+    companyId: company.id,
+    numero: bonLivraison.numero,
+    date: bonLivraison.date,
+    client: bonLivraison.client,
+    bonCommande: bonLivraison.bonCommande,
+    lignes: bonLivraison.lignes,
+    company,
+    filePath: newFilePath,
+  });
+
+  // Reconcilie le stock avec les nouvelles lignes : annule le solde net deja
+  // deduit pour ce bon (toujours present, un bon de livraison deduit sans
+  // condition a sa creation), puis rededuit avec les lignes a jour.
+  annulerMouvementsPourSource("bonLivraison", id);
+  appliquerMouvementsPourLignes(bonLivraison.lignes, {
+    source: "bonLivraison",
+    sourceId: id,
+    sourceNumero: bonLivraison.numero,
+  });
+
+  return { canceled: false, filePath: newFilePath, id: record.id };
+});
+
+ipcMain.handle("bonLivraison:openPdf", async (_event, id) => {
+  const record = getBonLivraison(id);
+  if (!record) return { opened: false, error: "Bon de livraison introuvable." };
+
+  let filePath = record.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    try {
+      const company = companySnapshotPourRegeneration(record);
+      const html = renderBonLivraisonHtml(company, record);
+      filePath = bonLivraisonFilePath(company, record.numero);
+      await writePdfToFile(html, filePath);
+      updateBonLivraison(id, { filePath });
+    } catch (err) {
+      return { opened: false, error: `Impossible de regenerer le PDF : ${err?.message || err}` };
+    }
+  }
+
+  const result = await shell.openPath(filePath);
+  if (result) return { opened: false, error: result };
+  return { opened: true };
+});
+
+ipcMain.handle("bonLivraison:renderHtml", (_event, bonLivraison) => {
+  const company = getActiveCompany();
+  return renderBonLivraisonHtml(company, bonLivraison);
+});
+
+ipcMain.handle("bonLivraison:print", async (_event, id) => {
+  const record = getBonLivraison(id);
+  if (!record) return { ok: false, error: "Bon de livraison introuvable." };
+
+  const company = companySnapshotPourRegeneration(record);
+  const html = renderBonLivraisonHtml(company, record);
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    width: LARGEUR_ZONE_IMPRIMABLE_PX,
+    height: 1200,
+  });
+
+  try {
+    await printWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    await remplirEspaceRestant(printWindow);
+
+    const printers = await printWindow.webContents.getPrintersAsync();
+    if (printers.length > 0) {
+      const { success, failureReason } = await printWindowAndWait(printWindow, {
+        silent: false,
+        printBackground: true,
+        pageSize: "A4",
+        margins: { marginType: "none" },
+      });
+      if (!success) {
+        if (failureReason === "cancelled" || failureReason === "canceled") {
+          return { ok: false, canceled: true };
+        }
+        return { ok: false, error: failureReason || "Echec de l'impression." };
+      }
+      return { ok: true, printed: true };
+    }
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Aucune imprimante detectee — enregistrer en PDF",
+      defaultPath: `bon-livraison-${sanitizeForPath(record.numero || "brouillon")}.pdf`,
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };

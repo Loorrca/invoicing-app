@@ -426,6 +426,12 @@ table.invoices-table td {
 table.invoices-table th.num,
 table.invoices-table td.num { text-align: right; }
 
+/* Ligne d'un bon de livraison deja rattache a une facture (voir
+   BonsLivraison.jsx) : visuellement attenuee et sa case a cocher est
+   desactivee, pour montrer d'un coup d'oeil qu'elle ne peut plus etre
+   selectionnee pour une nouvelle facture. */
+tr.row-muted td { color: var(--muted); }
+
 .invoices-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 
 .invoices-year-group { margin-bottom: 14px; }

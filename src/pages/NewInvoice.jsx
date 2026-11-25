@@ -89,11 +89,24 @@ function fmt(n) {
   return n.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
-export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCancelEdit }) {
+export default function NewInvoice({
+  editingId,
+  activeCompanyId,
+  onSaved,
+  onCancelEdit,
+  initialDraft,
+  onDraftConsumed,
+}) {
   const [numero, setNumero] = useState("");
   const [date, setDate] = useState(todayIso());
   const [bonCommande, setBonCommande] = useState("");
   const [bonsLivraison, setBonsLivraison] = useState([""]);
+  // Ids des bons de livraison a l'origine de cette facture (voir
+  // BonsLivraison.jsx, "Creer la facture") : vide pour une facture normale.
+  // Une fois la facture generee avec succes, ces bons de livraison sont
+  // marques comme factures (voir handleGenerate plus bas) — jamais en
+  // modification (editingId), seulement a la creation initiale.
+  const [bonsLivraisonSourceIds, setBonsLivraisonSourceIds] = useState([]);
   const [avecFodec, setAvecFodec] = useState(true);
   const [avecTimbre, setAvecTimbre] = useState(false);
   const [timbre, setTimbre] = useState("");
@@ -180,6 +193,29 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
         })
         .catch(() => setLoadingRecord(false));
     } else {
+      // Facture pre-remplie a partir d'un ou plusieurs bons de livraison
+      // (voir BonsLivraison.jsx, "Creer la facture") : client, lignes (sans
+      // prix - a completer) et references "Bon de livraison N°" deja en
+      // place. Consomme une seule fois (onDraftConsumed efface l'etat cote
+      // App.jsx) : revisiter cet onglet ensuite repart sur une facture vierge
+      // normale.
+      if (initialDraft) {
+        const recorded = initialDraft.client;
+        if (recorded && typeof recorded === "object" && recorded.id) {
+          setClientId(recorded.id);
+          setClientFallback(null);
+        } else {
+          setClientId("");
+          setClientFallback(recorded || null);
+        }
+        setLignes(initialDraft.lignes && initialDraft.lignes.length ? initialDraft.lignes : [emptyLigne()]);
+        setBonsLivraison(
+          initialDraft.bonsLivraison && initialDraft.bonsLivraison.length ? initialDraft.bonsLivraison : [""]
+        );
+        setBonsLivraisonSourceIds(initialDraft.bonsLivraisonSourceIds || []);
+        onDraftConsumed?.();
+      }
+
       // Deux temps : d'abord la proposition locale (instantanee, sans
       // attendre de synchro Drive) pour que le champ ne reste jamais
       // plusieurs secondes sur son placeholder d'exemple, puis la
@@ -312,6 +348,7 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
     setClientFallback(null);
     setShowNewClient(false);
     setNewClientDraft(emptyClientDraft());
+    setBonsLivraisonSourceIds([]);
   }
 
   function handleResetAll() {
@@ -391,6 +428,18 @@ export default function NewInvoice({ editingId, activeCompanyId, onSaved, onCanc
           text: editingId ? `Facture mise a jour : ${result.filePath}` : `PDF enregistre : ${result.filePath}`,
         });
         if (!editingId) {
+          // Facture issue d'un ou plusieurs bons de livraison (voir plus
+          // haut) : on les marque maintenant comme factures, pour qu'ils
+          // affichent une reference vers cette facture et ne puissent plus
+          // etre factures une deuxieme fois par erreur (voir
+          // BonsLivraison.jsx). Best-effort : un echec ici n'empeche pas la
+          // facture elle-meme, deja enregistree avec succes, de rester
+          // valide.
+          if (bonsLivraisonSourceIds.length) {
+            window.api
+              .marquerBonsLivraisonFactures(bonsLivraisonSourceIds, result.id, invoice.numero)
+              .catch(() => {});
+          }
           // Nouvelle facture generee : on repart directement sur une facture
           // vierge, avec le numero suivant propose automatiquement.
           resetFields();

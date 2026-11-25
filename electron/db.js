@@ -20,6 +20,12 @@ const COMPANY_DEFAULTS = {
   siege: "",
   logo_data_url: "",
   qr_data_url: "",
+  // Variante noir et blanc du logo (voir Settings.jsx, "Bon de livraison" et
+  // electron/lib/bonLivraisonTemplate.js) : utilisee en priorite sur les bons
+  // de livraison, qui restent volontairement imprimables a l'encre noire
+  // meme sur une imprimante non couleur. A defaut (pas encore renseignee),
+  // le gabarit retombe sur logo_data_url.
+  logo_bw_data_url: "",
   // Gabarit de facture ("classic" ou "lignes" — voir invoiceTemplate.js) :
   // "classic" par defaut pour toute nouvelle entreprise.
   invoice_template: "classic",

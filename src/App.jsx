@@ -3,11 +3,14 @@ import AppLock from "./components/AppLock.jsx";
 import Settings from "./pages/Settings.jsx";
 import NewInvoice from "./pages/NewInvoice.jsx";
 import InvoicesList from "./pages/InvoicesList.jsx";
+import NewBonLivraison from "./pages/NewBonLivraison.jsx";
+import BonsLivraison from "./pages/BonsLivraison.jsx";
 import Productions from "./pages/Productions.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Paiements from "./pages/Paiements.jsx";
 import Sauvegarde from "./pages/Sauvegarde.jsx";
 import Clients from "./pages/Clients.jsx";
+import Stock from "./pages/Stock.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
@@ -15,6 +18,9 @@ const TABS = [
   { id: "invoice", label: "Nouvelle facture" },
   { id: "clients", label: "Clients" },
   { id: "invoices", label: "Factures" },
+  { id: "bonLivraison", label: "Nouveau bon de livraison" },
+  { id: "bonsLivraison", label: "Bons de livraison" },
+  { id: "stock", label: "Stock" },
   { id: "productions", label: "Productions" },
   { id: "paiements", label: "Paiements" },
   { id: "sauvegarde", label: "Sauvegarde" },
@@ -27,6 +33,14 @@ export default function App() {
   const [companies, setCompanies] = useState([]);
   const [activeCompany, setActiveCompanyState] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+  const [editingBonLivraisonId, setEditingBonLivraisonId] = useState(null);
+  // Brouillon de facture propose depuis l'onglet Bons de livraison
+  // ("Creer la facture", voir BonsLivraison.jsx) : client + lignes fusionnees
+  // + ids des bons d'origine (pour les marquer factures une fois la facture
+  // generee, voir NewInvoice.jsx). Consomme une seule fois par NewInvoice
+  // (onDraftConsumed le remet a null), pour qu'un onglet "Nouvelle facture"
+  // ouvert normalement ensuite reparte bien d'un formulaire vide.
+  const [invoiceDraft, setInvoiceDraft] = useState(null);
   // null = statut pas encore connu (ecran vide le temps de demander a
   // l'IPC) ; false = verrouille, en attente de la bonne saisie (voir
   // AppLock.jsx) ; true = deverrouille (ou aucun mot de passe configure sur
@@ -89,7 +103,11 @@ export default function App() {
               <button
                 className={t.id === tab ? "nav-item active" : "nav-item"}
                 onClick={() => {
-                  if (t.id === "invoice") setEditingInvoiceId(null);
+                  if (t.id === "invoice") {
+                    setEditingInvoiceId(null);
+                    setInvoiceDraft(null);
+                  }
+                  if (t.id === "bonLivraison") setEditingBonLivraisonId(null);
                   setTab(t.id);
                 }}
               >
@@ -106,6 +124,8 @@ export default function App() {
             key={`${activeCompany?.id}-${editingInvoiceId || "new"}`}
             editingId={editingInvoiceId}
             activeCompanyId={activeCompany?.id}
+            initialDraft={invoiceDraft}
+            onDraftConsumed={() => setInvoiceDraft(null)}
             onCancelEdit={() => {
               setEditingInvoiceId(null);
               setTab("invoices");
@@ -127,7 +147,39 @@ export default function App() {
             }}
           />
         )}
+        {tab === "bonLivraison" && (
+          <NewBonLivraison
+            key={`${activeCompany?.id}-${editingBonLivraisonId || "new"}`}
+            editingId={editingBonLivraisonId}
+            activeCompanyId={activeCompany?.id}
+            onCancelEdit={() => {
+              setEditingBonLivraisonId(null);
+              setTab("bonsLivraison");
+            }}
+            onSaved={() => {
+              if (editingBonLivraisonId) {
+                setEditingBonLivraisonId(null);
+                setTab("bonsLivraison");
+              }
+            }}
+          />
+        )}
+        {tab === "bonsLivraison" && (
+          <BonsLivraison
+            key={activeCompany?.id}
+            onEdit={(id) => {
+              setEditingBonLivraisonId(id);
+              setTab("bonLivraison");
+            }}
+            onCreerFacture={(draft) => {
+              setInvoiceDraft(draft);
+              setEditingInvoiceId(null);
+              setTab("invoice");
+            }}
+          />
+        )}
         {tab === "clients" && <Clients />}
+        {tab === "stock" && <Stock />}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
         {tab === "paiements" && <Paiements key={activeCompany?.id} />}
         {tab === "sauvegarde" && <Sauvegarde />}

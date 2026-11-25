@@ -211,6 +211,9 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
   // HT ou TTC pour le graphique d'evolution uniquement (les autres cartes
   // monetaires du tableau de bord sont toutes en TTC, voir stats ci-dessous).
   const [evolutionMode, setEvolutionMode] = useState("ttc");
+  // "Top clients" replie (top 5, comportement d'origine) ou deplie (tous les
+  // clients au-dessus de 10 000 DT TTC, voir stats.clientsAbove10000).
+  const [clientsExpanded, setClientsExpanded] = useState(false);
 
   // Annees proposees dans le selecteur : celles qui ont au moins une
   // facture, plus l'annee civile en cours (meme vide, ex. le 1er janvier,
@@ -399,10 +402,15 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       delta = prevMonthTTC > 0 ? ((thisMonthTTC - prevMonthTTC) / prevMonthTTC) * 100 : null;
     }
 
-    const topClients = [...clientTotals.entries()]
+    const clientsTriesParMontant = [...clientTotals.entries()]
       .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
+      .sort((a, b) => b.value - a.value);
+
+    const topClients = clientsTriesParMontant.slice(0, 5);
+
+    // Vue "depliee" de la carte Top clients (voir clientsExpanded) : top 10
+    // au lieu du top 5.
+    const top10Clients = clientsTriesParMontant.slice(0, 10);
 
     const topProducts = [...productTotals.values()]
       .map((p) => ({ label: p.designation, value: p.quantite }))
@@ -422,6 +430,7 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
       prevMonthTTC,
       delta,
       topClients,
+      top10Clients,
       topProducts,
       estAnneeEnCours,
     };
@@ -584,8 +593,27 @@ export default function Dashboard({ onGoToInvoices, onGoToPaiements, onGoToSauve
 
           <div className="grid-2 dashboard-grid">
             <div className="card">
-              <h2 className="section-title">Top clients (TTC) — {selectedYear}</h2>
-              {stats.topClients.length ? (
+              <div className="dashboard-card-header">
+                <h2 className="section-title">
+                  {clientsExpanded
+                    ? `Top 10 clients (TTC) — ${selectedYear}`
+                    : `Top clients (TTC) — ${selectedYear}`}
+                </h2>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => setClientsExpanded((v) => !v)}
+                >
+                  {clientsExpanded ? "Réduire" : "Voir plus"}
+                </button>
+              </div>
+              {clientsExpanded ? (
+                stats.top10Clients.length ? (
+                  <HorizontalBars data={stats.top10Clients} formatValue={fmtMoney} />
+                ) : (
+                  <p className="subtitle">Aucune donnee.</p>
+                )
+              ) : stats.topClients.length ? (
                 <HorizontalBars data={stats.topClients} formatValue={fmtMoney} />
               ) : (
                 <p className="subtitle">Aucune donnee.</p>

@@ -1,8 +1,9 @@
 "use strict";
 
 // Orchestrateur de synchronisation entre postes : un cycle complet consiste,
-// pour chacune des 4 collections (entreprises, clients, articles, factures),
-// a telecharger la version sur Drive (voir driveSync.js), la fusionner avec
+// pour chacune des 7 collections (entreprises, clients, articles, factures,
+// bons de livraison, articles suivis en stock, mouvements de stock), a
+// telecharger la version sur Drive (voir driveSync.js), la fusionner avec
 // la copie locale par id (voir syncMerge.js), puis a ecrire le resultat
 // fusionne localement ET a le renvoyer sur Drive — pour que Drive reflete
 // toujours la derniere version fusionnee connue, et que le prochain poste a
@@ -20,6 +21,8 @@ const db = require("../db");
 const clientsModule = require("./clients");
 const articlesModule = require("../articles");
 const invoicesModule = require("../invoices");
+const bonsLivraisonModule = require("../bonsLivraison");
+const stockModule = require("../stock");
 
 // Chaque collection : le nom du fichier sur Drive, comment lire la version
 // locale complete (tombstones inclus), et comment remplacer la version
@@ -44,6 +47,25 @@ const COLLECTIONS = [
     nom: "invoices.json",
     listerLocal: () => invoicesModule.listAllForSync(),
     remplacerLocal: (nouvelles) => invoicesModule.remplacerToutesLesFactures(nouvelles),
+  },
+  {
+    nom: "bonsLivraison.json",
+    listerLocal: () => bonsLivraisonModule.listAllForSync(),
+    remplacerLocal: (nouveaux) => bonsLivraisonModule.remplacerTousLesBonsLivraison(nouveaux),
+  },
+  {
+    nom: "stockArticles.json",
+    listerLocal: () => stockModule.listAllArticlesSuiviForSync(),
+    remplacerLocal: (nouveaux) => stockModule.remplacerTousLesArticlesSuivis(nouveaux),
+  },
+  {
+    // Journal append-only (voir electron/stock.js) : chaque mouvement a son
+    // propre id, jamais reecrit, donc jamais en conflit lors de la fusion
+    // (fusionnerParId) - contrairement a un simple compteur, deux postes qui
+    // deduisent en parallele avant une synchro ne se marchent jamais dessus.
+    nom: "stockMouvements.json",
+    listerLocal: () => stockModule.listAllMouvementsForSync(),
+    remplacerLocal: (nouveaux) => stockModule.remplacerTousLesMouvements(nouveaux),
   },
 ];
 
@@ -143,4 +165,24 @@ async function synchroniserFacturesAvantNumerotation() {
   }
 }
 
-module.exports = { executerCycleDeSync, synchroniserFacturesAvantNumerotation };
+// Meme principe que synchroniserFacturesAvantNumerotation ci-dessus, pour les
+// bons de livraison (numerotation totalement separee des factures, voir
+// electron/bonsLivraison.js).
+async function synchroniserBonsLivraisonAvantNumerotation() {
+  if (!estConfigure()) return;
+  const def = COLLECTIONS.find((c) => c.nom === "bonsLivraison.json");
+  try {
+    await synchroniserCollection(def);
+  } catch (err) {
+    console.error(
+      "Sync Drive (avant numerotation, bons de livraison) : echec, on continue avec les donnees locales :",
+      err.message || err
+    );
+  }
+}
+
+module.exports = {
+  executerCycleDeSync,
+  synchroniserFacturesAvantNumerotation,
+  synchroniserBonsLivraisonAvantNumerotation,
+};

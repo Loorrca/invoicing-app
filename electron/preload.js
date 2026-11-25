@@ -32,6 +32,24 @@ contextBridge.exposeInMainWorld("api", {
   openInvoicePdf: (id) => ipcRenderer.invoke("invoice:openPdf", id),
   renderInvoiceHtml: (invoice) => ipcRenderer.invoke("invoice:renderHtml", invoice),
   printInvoice: (id) => ipcRenderer.invoke("invoice:print", id),
+  listBonsLivraison: () => ipcRenderer.invoke("bonsLivraison:list"),
+  getBonLivraisonRecord: (id) => ipcRenderer.invoke("bonsLivraison:get", id),
+  getNextNumeroBonLivraison: () => ipcRenderer.invoke("bonsLivraison:nextNumero"),
+  getNextNumeroBonLivraisonLocal: () => ipcRenderer.invoke("bonsLivraison:nextNumeroLocal"),
+  deleteBonLivraisonRecord: (id) => ipcRenderer.invoke("bonsLivraison:delete", id),
+  marquerBonsLivraisonFactures: (ids, factureId, factureNumero) =>
+    ipcRenderer.invoke("bonsLivraison:marquerFactures", { ids, factureId, factureNumero }),
+  generateBonLivraisonPdf: (bonLivraison) => ipcRenderer.invoke("bonLivraison:generatePdf", bonLivraison),
+  updateAndSaveBonLivraison: (id, bonLivraison) =>
+    ipcRenderer.invoke("bonLivraison:updateAndSave", { id, bonLivraison }),
+  openBonLivraisonPdf: (id) => ipcRenderer.invoke("bonLivraison:openPdf", id),
+  printBonLivraison: (id) => ipcRenderer.invoke("bonLivraison:print", id),
+  listStock: () => ipcRenderer.invoke("stock:list"),
+  getCatalogueArticlesStock: () => ipcRenderer.invoke("stock:catalogueArticles"),
+  suivreArticleStock: (fields) => ipcRenderer.invoke("stock:suivreArticle", fields),
+  retirerSuiviStock: (code) => ipcRenderer.invoke("stock:retirerSuivi", code),
+  ajusterQuantiteStock: (code, nouvelleQuantite) =>
+    ipcRenderer.invoke("stock:ajusterManuellement", { code, nouvelleQuantite }),
   scanPayments: () => ipcRenderer.invoke("payments:scan"),
   verifyPayment: (invoiceId, operationKey, confirmer) =>
     ipcRenderer.invoke("payments:verify", { invoiceId, operationKey, confirmer }),

@@ -12,6 +12,7 @@ const EMPTY = {
   siege: "",
   logo_data_url: "",
   qr_data_url: "",
+  logo_bw_data_url: "",
   invoice_template: "classic",
 };
 
@@ -45,6 +46,7 @@ export default function Settings({ activeCompany, onSaved }) {
   const [status, setStatus] = useState(null); // { kind: "ok"|"error", text }
   const fileInputRef = useRef(null);
   const qrInputRef = useRef(null);
+  const logoBwInputRef = useRef(null);
 
   // Verrouillage de l'application (voir electron/lib/appLock.js et
   // src/components/AppLock.jsx) : local a CE poste, independant de
@@ -126,6 +128,18 @@ export default function Settings({ activeCompany, onSaved }) {
     update("qr_data_url", dataUrl);
   }
 
+  // Variante noir et blanc du logo, utilisee en priorite sur les bons de
+  // livraison (voir electron/lib/bonLivraisonTemplate.js) : un bon de
+  // livraison reste imprimable a l'encre noire meme sur une imprimante non
+  // couleur. Optionnelle - a defaut, le gabarit retombe sur le logo couleur
+  // habituel.
+  async function handleLogoBwChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await resizeImage(file);
+    update("logo_bw_data_url", dataUrl);
+  }
+
   async function handleSave(e) {
     e.preventDefault();
     setStatus(null);
@@ -176,6 +190,41 @@ export default function Settings({ activeCompany, onSaved }) {
               accept="image/*"
               style={{ display: "none" }}
               onChange={handleLogoChange}
+            />
+          </div>
+        </div>
+
+        <div className="form-row logo-row">
+          <div className="logo-preview" onClick={() => logoBwInputRef.current?.click()}>
+            {values.logo_bw_data_url ? (
+              <img src={values.logo_bw_data_url} alt="Logo noir et blanc" />
+            ) : (
+              <span>Ajouter un logo N&amp;B</span>
+            )}
+          </div>
+          <div>
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              Variante noir et blanc du logo, utilisee sur les bons de livraison (imprimables a
+              l'encre noire). Optionnel : a defaut, le logo couleur ci-dessus est utilise.
+            </p>
+            <button type="button" className="btn secondary" onClick={() => logoBwInputRef.current?.click()}>
+              Choisir une image
+            </button>
+            {values.logo_bw_data_url && (
+              <button
+                type="button"
+                className="btn link"
+                onClick={() => update("logo_bw_data_url", "")}
+              >
+                Retirer le logo N&amp;B
+              </button>
+            )}
+            <input
+              ref={logoBwInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleLogoBwChange}
             />
           </div>
         </div>

@@ -54,6 +54,7 @@ const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require(".
 const { initLock, hasPassword, verifyPassword, setPassword } = require("./lib/appLock");
 const driveSync = require("./lib/driveSync");
 const {
+  initSyncOrchestrator,
   executerCycleDeSync,
   synchroniserFacturesAvantNumerotation,
   synchroniserBonsLivraisonAvantNumerotation,
@@ -362,6 +363,7 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initBonsLivraison(app.getPath("userData"));
   initStock(app.getPath("userData"));
+  initSyncOrchestrator(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
   initLock(app.getPath("userData"));

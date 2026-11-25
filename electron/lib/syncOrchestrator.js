@@ -14,6 +14,8 @@
 // independamment, les erreurs sont rassemblees et renvoyees a l'appelant
 // plutot que de faire planter tout le cycle.
 
+const fs = require("node:fs");
+const path = require("node:path");
 const { estConfigure, telechargerJson, envoyerJson } = require("./driveSync");
 const { fusionnerParId } = require("./syncMerge");
 
@@ -114,6 +116,35 @@ async function synchroniserCollection(def) {
   return fusionne.length;
 }
 
+// Journal (best-effort, diagnostic uniquement) des derniers cycles complets
+// - permet de verifier a posteriori, sans terminal ni console ouverte, si un
+// cycle a bien tourne et ce qu'il a vu pour chaque collection (nombre
+// d'enregistrements apres fusion, ou message d'erreur). Garde les 50
+// dernieres entrees seulement.
+let journalPath = null;
+
+function initSyncOrchestrator(userDataDir) {
+  journalPath = path.join(userDataDir, "sync-log.json");
+}
+
+function journaliser(entree) {
+  if (!journalPath) return;
+  let historique = [];
+  try {
+    const brut = JSON.parse(fs.readFileSync(journalPath, "utf-8"));
+    if (Array.isArray(brut)) historique = brut;
+  } catch {
+    // pas de fichier, ou fichier invalide : on repart d'un journal vide
+  }
+  historique.push(entree);
+  if (historique.length > 50) historique = historique.slice(-50);
+  try {
+    fs.writeFileSync(journalPath, JSON.stringify(historique, null, 2), "utf-8");
+  } catch {
+    // purement diagnostique : ne doit jamais faire planter un cycle de sync
+  }
+}
+
 // Un seul cycle a la fois (le minuteur periodique et le declenchement avant
 // numerotation pourraient sinon se chevaucher).
 let cycleEnCours = false;
@@ -140,6 +171,8 @@ async function executerCycleDeSync() {
   } finally {
     cycleEnCours = false;
   }
+
+  journaliser({ horodatage: new Date().toISOString(), resultats, erreurs });
 
   return { ok: Object.keys(erreurs).length === 0, resultats, erreurs };
 }
@@ -182,6 +215,7 @@ async function synchroniserBonsLivraisonAvantNumerotation() {
 }
 
 module.exports = {
+  initSyncOrchestrator,
   executerCycleDeSync,
   synchroniserFacturesAvantNumerotation,
   synchroniserBonsLivraisonAvantNumerotation,

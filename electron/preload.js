@@ -47,9 +47,11 @@ contextBridge.exposeInMainWorld("api", {
   listStock: () => ipcRenderer.invoke("stock:list"),
   getCatalogueArticlesStock: () => ipcRenderer.invoke("stock:catalogueArticles"),
   suivreArticleStock: (fields) => ipcRenderer.invoke("stock:suivreArticle", fields),
-  retirerSuiviStock: (code) => ipcRenderer.invoke("stock:retirerSuivi", code),
-  ajusterQuantiteStock: (code, nouvelleQuantite) =>
-    ipcRenderer.invoke("stock:ajusterManuellement", { code, nouvelleQuantite }),
+  lierCodeStock: (articleId, code) => ipcRenderer.invoke("stock:lierCode", { articleId, code }),
+  delierCodeStock: (articleId, code) => ipcRenderer.invoke("stock:delierCode", { articleId, code }),
+  retirerSuiviStock: (articleId) => ipcRenderer.invoke("stock:retirerSuivi", articleId),
+  ajusterQuantiteStock: (articleId, nouvelleQuantite) =>
+    ipcRenderer.invoke("stock:ajusterManuellement", { articleId, nouvelleQuantite }),
   scanPayments: () => ipcRenderer.invoke("payments:scan"),
   verifyPayment: (invoiceId, operationKey, confirmer) =>
     ipcRenderer.invoke("payments:verify", { invoiceId, operationKey, confirmer }),

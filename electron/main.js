@@ -42,6 +42,8 @@ const {
   listArticlesSuivis,
   toutesLesQuantites,
   suivreArticle,
+  lierCode,
+  delierCode,
   retirerSuivi,
   ajusterManuellement,
   appliquerMouvementsPourLignes,
@@ -418,19 +420,21 @@ ipcMain.handle("articles:delete", (_event, id) => deleteArticle(id));
 
 // --------------------------------------------------------------------------
 // IPC : suivi de stock (voir electron/stock.js) - commun aux deux
-// entreprises, indexe par code article (pas de companyId).
+// entreprises, un article suivi pouvant regrouper plusieurs codes
+// equivalents (un par catalogue d'entreprise portant la meme reference).
 // --------------------------------------------------------------------------
 
-// Liste des articles suivis + leur quantite actuelle (somme des mouvements),
-// pour l'affichage de l'onglet Stock.
+// Liste des articles suivis + leur quantite actuelle (somme des mouvements
+// de tous leurs codes equivalents), pour l'affichage de l'onglet Stock.
 ipcMain.handle("stock:list", () => {
   const quantites = toutesLesQuantites();
-  return listArticlesSuivis().map((a) => ({ ...a, quantite: quantites.get(a.code) || 0 }));
+  return listArticlesSuivis().map((a) => ({ ...a, quantite: quantites.get(a.id) || 0 }));
 });
 
 // Catalogue fusionne (deduplique par code) des articles des DEUX
-// entreprises, pour le selecteur "Ajouter un article a suivre" - un meme
-// code peut exister dans les deux catalogues, on ne le propose qu'une fois.
+// entreprises, pour les selecteurs "Suivre un article"/"Lier un code" - un
+// meme code peut exister dans les deux catalogues, on ne le propose qu'une
+// fois.
 ipcMain.handle("stock:catalogueArticles", () => {
   const vu = new Map();
   for (const company of listCompanies()) {
@@ -443,12 +447,21 @@ ipcMain.handle("stock:catalogueArticles", () => {
   return [...vu.values()].sort((a, b) => a.code.localeCompare(b.code, "fr", { numeric: true }));
 });
 
+// `fields.codes` : un ou plusieurs codes equivalents choisis d'emblee (ex.
+// le code TEXBANNER et celui de MASTERFLAG pour la meme reference) - voir
+// stock.js, suivreArticle.
 ipcMain.handle("stock:suivreArticle", (_event, fields) => suivreArticle(fields));
 
-ipcMain.handle("stock:retirerSuivi", (_event, code) => retirerSuivi(code));
+// Rattache un code equivalent supplementaire a un article deja suivi,
+// decouvert apres coup (voir stock.js, lierCode).
+ipcMain.handle("stock:lierCode", (_event, { articleId, code }) => lierCode(articleId, code));
 
-ipcMain.handle("stock:ajusterManuellement", (_event, { code, nouvelleQuantite }) =>
-  ajusterManuellement(code, nouvelleQuantite)
+ipcMain.handle("stock:delierCode", (_event, { articleId, code }) => delierCode(articleId, code));
+
+ipcMain.handle("stock:retirerSuivi", (_event, articleId) => retirerSuivi(articleId));
+
+ipcMain.handle("stock:ajusterManuellement", (_event, { articleId, nouvelleQuantite }) =>
+  ajusterManuellement(articleId, nouvelleQuantite)
 );
 
 // --------------------------------------------------------------------------

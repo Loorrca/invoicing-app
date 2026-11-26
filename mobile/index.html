@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Achats — Scanner une facture</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #f4f4f5; color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: stretch;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  h1 { font-size: 1.25rem; margin: 1.2em 0 0.3em; }
+  p.hint { color: #595959; font-size: 0.92rem; line-height: 1.5; margin: 0 0 1.2em; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  button {
+    display: block; width: 100%; padding: 14px; font-size: 1rem; font-weight: 600;
+    border-radius: 10px; border: none; margin-top: 10px; cursor: pointer;
+  }
+  button.primary { background: #1a1a1a; color: #fff; }
+  button.secondary { background: #ececec; color: #1a1a1a; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  input[type="file"] { display: none; }
+  .capture-label {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 18px; border: 2px dashed #bbb; border-radius: 10px; cursor: pointer;
+    color: #444; font-weight: 600;
+  }
+  img.preview { width: 100%; border-radius: 10px; margin-top: 12px; max-height: 50vh; object-fit: contain; background: #000; }
+  .status { margin-top: 10px; font-size: 0.92rem; }
+  .status.ok { color: #1a7a3d; }
+  .status.error { color: #b3261e; }
+  .status.busy { color: #595959; }
+</style>
+</head>
+<body>
+
+  <h1>Scanner une facture d'achat</h1>
+  <p class="hint">
+    Prenez la facture en photo : elle est envoyee directement dans le dossier Drive partage. Le montant est lu et
+    confirme ensuite sur l'ordinateur, dans l'onglet "Achats".
+  </p>
+
+  <div class="card" id="carteConnexion">
+    <button class="primary" id="boutonConnexion">Se connecter avec Google</button>
+    <p class="status" id="statutConnexion"></p>
+  </div>
+
+  <div class="card" id="carteCapture" style="display:none">
+    <label class="capture-label" for="inputPhoto">📷 Prendre une photo</label>
+    <input type="file" accept="image/*" capture="environment" id="inputPhoto" />
+    <img class="preview" id="apercu" style="display:none" />
+    <button class="primary" id="boutonEnvoyer" style="display:none">Envoyer</button>
+    <button class="secondary" id="boutonReprendre" style="display:none">Reprendre une photo</button>
+    <p class="status" id="statutEnvoi"></p>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    "use strict";
+
+    // ------------------------------------------------------------------
+    // A REMPLIR une fois l'identifiant OAuth cree dans Google Cloud Console
+    // (meme projet que le compte de service utilise par l'app de bureau —
+    // voir les instructions fournies a cote de ce fichier). Sans cette
+    // valeur, le bouton "Se connecter" ne fonctionnera pas.
+    // ------------------------------------------------------------------
+    const GOOGLE_CLIENT_ID = "89767386477-ol43fa61q9m8lmqpgspg2cqhngk4cq9f.apps.googleusercontent.com";
+
+    // Meme dossier Drive partage que l'app de bureau (voir
+    // DRIVE_SYNC_FOLDER_ID dans electron/main.js) — a modifier ici UNIQUEMENT
+    // si cet id venait a changer cote app de bureau.
+    const DOSSIER_PARTAGE_ID = "1RnP93zlOBc0RHA31HpbAQVXvHuoLC4Lq";
+    const SOUS_DOSSIER_PHOTOS = "achats-photos";
+
+    const SCOPE = "https://www.googleapis.com/auth/drive";
+
+    let accessToken = null;
+    let expirationToken = 0; // epoch ms
+    let tokenClient = null;
+    let idDossierPhotos = null; // mis en cache apres la premiere verification/creation
+
+    const el = (id) => document.getElementById(id);
+
+    function definirStatut(id, texte, type) {
+      const n = el(id);
+      n.textContent = texte || "";
+      n.className = "status" + (type ? " " + type : "");
+    }
+
+    // ------------------------------------------------------------------
+    // Appels Drive API bruts (memes principes que electron/lib/driveSync.js
+    // cote app de bureau, mais ici avec le jeton OAuth de l'utilisateur —
+    // PAS le compte de service — ce qui permet de CREER des fichiers/dossiers
+    // (voir le commentaire sur le scope "drive" dans driveSync.js : un
+    // compte de service n'a pas de quota de stockage propre, un compte
+    // humain si).
+    // ------------------------------------------------------------------
+
+    async function driveFetch(url, options = {}) {
+      const headers = { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` };
+      const res = await fetch(url, { ...options, headers });
+      if (!res.ok) {
+        const corps = await res.text().catch(() => "");
+        throw new Error(`Drive API ${res.status} : ${corps.slice(0, 200)}`);
+      }
+      return res;
+    }
+
+    async function trouverDansDossier(nom, parentId, mimeTypeDossier) {
+      const filtreMime = mimeTypeDossier ? ` and mimeType = 'application/vnd.google-apps.folder'` : "";
+      const q = encodeURIComponent(`name = '${nom}' and '${parentId}' in parents and trashed = false${filtreMime}`);
+      const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+      const data = await res.json();
+      return data.files && data.files[0] ? data.files[0].id : null;
+    }
+
+    async function creerDossier(nom, parentId) {
+      const res = await driveFetch("https://www.googleapis.com/drive/v3/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nom, mimeType: "application/vnd.google-apps.folder", parents: [parentId] }),
+      });
+      const data = await res.json();
+      return data.id;
+    }
+
+    async function creerFichierJsonSiAbsent(nom, parentId, contenuParDefaut) {
+      const idExistant = await trouverDansDossier(nom, parentId, false);
+      if (idExistant) return idExistant;
+      const boundary = "achatsMobile" + Date.now();
+      const metadata = { name: nom, parents: [parentId] };
+      const contenu = JSON.stringify(contenuParDefaut);
+      const corps =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${contenu}\r\n--${boundary}--`;
+      const res = await driveFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body: corps,
+      });
+      const data = await res.json();
+      return data.id;
+    }
+
+    async function envoyerPhoto(blob, nomFichier) {
+      const boundary = "achatsMobilePhoto" + Date.now();
+      const metadata = { name: nomFichier, parents: [idDossierPhotos] };
+      const entete = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${blob.type || "image/jpeg"}\r\n\r\n`;
+      const pied = `\r\n--${boundary}--`;
+      const corps = new Blob([entete, blob, pied]);
+      await driveFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body: corps,
+      });
+    }
+
+    // Verifie (et cree si besoin, une seule fois par session) le sous-dossier
+    // des photos et le fichier achats.json — avec le compte humain connecte,
+    // ces creations ne buteront jamais sur le probleme de quota rencontre
+    // avec le compte de service (voir sync-log.json / sa diagnostic cote
+    // app de bureau).
+    async function assurerStructureDrive() {
+      if (idDossierPhotos) return;
+      definirStatut("statutConnexion", "Verification du dossier Drive...", "busy");
+      let id = await trouverDansDossier(SOUS_DOSSIER_PHOTOS, DOSSIER_PARTAGE_ID, true);
+      if (!id) id = await creerDossier(SOUS_DOSSIER_PHOTOS, DOSSIER_PARTAGE_ID);
+      idDossierPhotos = id;
+      await creerFichierJsonSiAbsent("achats.json", DOSSIER_PARTAGE_ID, []);
+    }
+
+    // ------------------------------------------------------------------
+    // Connexion Google (Google Identity Services, "token client" — popup de
+    // consentement standard, jamais de mot de passe gere par cette page).
+    // ------------------------------------------------------------------
+
+    function initialiserConnexion() {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: SCOPE,
+        callback: async (reponse) => {
+          if (reponse.error) {
+            definirStatut("statutConnexion", "Connexion annulee ou refusee.", "error");
+            return;
+          }
+          accessToken = reponse.access_token;
+          expirationToken = Date.now() + (reponse.expires_in || 3600) * 1000 - 30000;
+          try {
+            await assurerStructureDrive();
+            definirStatut("statutConnexion", "", "");
+            el("carteConnexion").style.display = "none";
+            el("carteCapture").style.display = "block";
+          } catch (err) {
+            definirStatut("statutConnexion", "Erreur : " + err.message, "error");
+          }
+        },
+      });
+    }
+
+    function jetonValide() {
+      return accessToken && Date.now() < expirationToken;
+    }
+
+    el("boutonConnexion").addEventListener("click", () => {
+      if (!tokenClient) {
+        definirStatut("statutConnexion", "Google n'est pas encore charge, reessayez dans un instant.", "error");
+        return;
+      }
+      definirStatut("statutConnexion", "", "");
+      tokenClient.requestAccessToken({ prompt: jetonValide() ? "" : "consent" });
+    });
+
+    window.addEventListener("load", () => {
+      // google.accounts n'est disponible qu'une fois le script externe charge.
+      const attendre = setInterval(() => {
+        if (window.google && window.google.accounts) {
+          clearInterval(attendre);
+          initialiserConnexion();
+        }
+      }, 100);
+    });
+
+    // ------------------------------------------------------------------
+    // Capture + envoi de la photo.
+    // ------------------------------------------------------------------
+
+    let photoChoisie = null;
+
+    el("inputPhoto").addEventListener("change", (e) => {
+      const fichier = e.target.files && e.target.files[0];
+      if (!fichier) return;
+      photoChoisie = fichier;
+      el("apercu").src = URL.createObjectURL(fichier);
+      el("apercu").style.display = "block";
+      el("boutonEnvoyer").style.display = "block";
+      el("boutonReprendre").style.display = "block";
+      definirStatut("statutEnvoi", "", "");
+    });
+
+    el("boutonReprendre").addEventListener("click", () => {
+      photoChoisie = null;
+      el("inputPhoto").value = "";
+      el("apercu").style.display = "none";
+      el("boutonEnvoyer").style.display = "none";
+      el("boutonReprendre").style.display = "none";
+      definirStatut("statutEnvoi", "", "");
+    });
+
+    el("boutonEnvoyer").addEventListener("click", async () => {
+      if (!photoChoisie) return;
+      el("boutonEnvoyer").disabled = true;
+      definirStatut("statutEnvoi", "Envoi en cours...", "busy");
+      try {
+        if (!jetonValide()) {
+          definirStatut("statutEnvoi", "Session expiree, reconnectez-vous.", "error");
+          el("carteConnexion").style.display = "block";
+          el("carteCapture").style.display = "none";
+          return;
+        }
+        const extension = (photoChoisie.name && photoChoisie.name.split(".").pop()) || "jpg";
+        const nomFichier = `achat-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
+        await envoyerPhoto(photoChoisie, nomFichier);
+        definirStatut("statutEnvoi", "Facture envoyee. Elle apparaitra dans l'onglet Achats sur l'ordinateur.", "ok");
+        photoChoisie = null;
+        el("inputPhoto").value = "";
+        el("apercu").style.display = "none";
+        el("boutonEnvoyer").style.display = "none";
+        el("boutonReprendre").style.display = "none";
+      } catch (err) {
+        definirStatut("statutEnvoi", "Erreur : " + err.message, "error");
+      } finally {
+        el("boutonEnvoyer").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

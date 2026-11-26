@@ -11,6 +11,7 @@ import Paiements from "./pages/Paiements.jsx";
 import Sauvegarde from "./pages/Sauvegarde.jsx";
 import Clients from "./pages/Clients.jsx";
 import Stock from "./pages/Stock.jsx";
+import Achats from "./pages/Achats.jsx";
 
 const TABS = [
   { id: "settings", label: "Entreprise" },
@@ -21,6 +22,7 @@ const TABS = [
   { id: "bonLivraison", label: "Nouveau bon de livraison" },
   { id: "bonsLivraison", label: "Bons de livraison" },
   { id: "stock", label: "Stock" },
+  { id: "achats", label: "Achats" },
   { id: "productions", label: "Productions" },
   { id: "paiements", label: "Paiements" },
   { id: "sauvegarde", label: "Sauvegarde" },
@@ -180,6 +182,7 @@ export default function App() {
         )}
         {tab === "clients" && <Clients />}
         {tab === "stock" && <Stock />}
+        {tab === "achats" && <Achats />}
         {tab === "productions" && <Productions key={activeCompany?.id} />}
         {tab === "paiements" && <Paiements key={activeCompany?.id} />}
         {tab === "sauvegarde" && <Sauvegarde />}

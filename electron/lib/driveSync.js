@@ -22,6 +22,13 @@ const { JWT } = require("google-auth-library");
 // (voir "files" dans package.json) — le depot et les Releases GitHub sont
 // publics. Chaque poste porte sa propre copie du fichier, placee a la main
 // une fois (voir keyFilePath), jamais embarquee dans l'installeur.
+//
+// Depuis l'ajout des achats de matieres premieres (voir electron/achats.js),
+// ce module lit aussi des FICHIERS BINAIRES (photos) dans un sous-dossier du
+// dossier partage, deposees par la page mobile (voir mobile/, qui ecrit
+// directement sur Drive avec le compte Google personnel de l'utilisateur,
+// jamais avec ce compte de service) — voir listerFichiersDossier et
+// telechargerFichierBinaire ci-dessous.
 
 let jwtClient = null;
 let dossierId = null;
@@ -118,4 +125,51 @@ async function envoyerJson(nomFichier, donnees) {
   return data.id;
 }
 
-module.exports = { initDriveSync, estConfigure, telechargerJson, envoyerJson };
+// Trouve l'id du SOUS-DOSSIER portant ce nom, directement sous le dossier
+// partage configure (ou null s'il n'existe pas encore). Utilise pour
+// "achats-photos" (voir electron/achats.js) : ce sous-dossier est cree a la
+// main par l'utilisateur, une seule fois, avec son compte Google personnel
+// (meme precaution que pour les fichiers JSON eux-memes — voir le
+// commentaire sur le scope "drive" plus haut, un compte de service ne peut
+// rien creer de lui-meme, dossier compris).
+async function trouverSousDossier(nomDossier) {
+  const q = encodeURIComponent(
+    `name = '${nomDossier}' and '${dossierId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const res = await authFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  const data = await res.json();
+  return data.files && data.files[0] ? data.files[0].id : null;
+}
+
+// Liste les fichiers (photos deposees depuis le telephone) d'un sous-dossier
+// du dossier partage, les plus recents en premier. Renvoie une liste vide
+// (jamais une erreur) si le sous-dossier n'existe pas encore — etat normal
+// avant que l'utilisateur ne l'ait cree/partage avec son compte Google.
+async function listerFichiersDossier(nomSousDossier) {
+  const idDossier = await trouverSousDossier(nomSousDossier);
+  if (!idDossier) return [];
+  const q = encodeURIComponent(`'${idDossier}' in parents and trashed = false`);
+  const res = await authFetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=200`
+  );
+  const data = await res.json();
+  return data.files || [];
+}
+
+// Telecharge le contenu brut (binaire) d'un fichier Drive par son id — pour
+// les photos, par opposition a telechargerJson ci-dessus. Renvoie un Buffer
+// Node.
+async function telechargerFichierBinaire(fileId) {
+  const res = await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+module.exports = {
+  initDriveSync,
+  estConfigure,
+  telechargerJson,
+  envoyerJson,
+  listerFichiersDossier,
+  telechargerFichierBinaire,
+};

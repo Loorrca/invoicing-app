@@ -49,6 +49,8 @@ const {
   appliquerMouvementsPourLignes,
   annulerMouvementsPourSource,
 } = require("./stock");
+const { initAchats, listAchats, photoFileIdsDejaTraites, addAchat, deleteAchat } = require("./achats");
+const { analyserImageAchat } = require("./lib/achatOcr");
 const { initPayments, releveDirFor, scanPayments, verifyPayment, importActivityFile, manualMatch } = require("./payments");
 const { initBackup, exportBackup, importBackup, getLastBackupInfo } = require("./backup");
 const { initLock, hasPassword, verifyPassword, setPassword } = require("./lib/appLock");
@@ -58,6 +60,7 @@ const {
   executerCycleDeSync,
   synchroniserFacturesAvantNumerotation,
   synchroniserBonsLivraisonAvantNumerotation,
+  synchroniserAchats,
 } = require("./lib/syncOrchestrator");
 
 // Optionnel : si le module n'est pas installe (npm install manquant), on se
@@ -89,6 +92,12 @@ try {
 // sous Linux (ce poste de dev/test). Le fichier n'est JAMAIS dans le depot ni
 // le build (voir .gitignore) : il est depose a la main, une fois par poste.
 const DRIVE_SYNC_FOLDER_ID = "1RnP93zlOBc0RHA31HpbAQVXvHuoLC4Lq";
+
+// Sous-dossier (du meme dossier Drive partage) ou la page mobile depose les
+// photos de factures d'achat (voir mobile/ et electron/achats.js) - cree a
+// la main par l'utilisateur, une seule fois, avec son compte Google
+// personnel (voir le commentaire sur le scope "drive" dans driveSync.js).
+const ACHATS_PHOTOS_DOSSIER = "achats-photos";
 
 function driveSyncKeyFilePath() {
   return path.join(app.getPath("userData"), "drive-sync-key.json");
@@ -363,6 +372,7 @@ app.whenReady().then(() => {
   initInvoices(app.getPath("userData"));
   initBonsLivraison(app.getPath("userData"));
   initStock(app.getPath("userData"));
+  initAchats(app.getPath("userData"));
   initSyncOrchestrator(app.getPath("userData"));
   initPayments(app.getPath("userData"), dossierFacturationBase());
   initBackup(app.getPath("userData"), dossierFacturationBase());
@@ -465,6 +475,65 @@ ipcMain.handle("stock:retirerSuivi", (_event, articleId) => retirerSuivi(article
 ipcMain.handle("stock:ajusterManuellement", (_event, { articleId, nouvelleQuantite }) =>
   ajusterManuellement(articleId, nouvelleQuantite)
 );
+
+// --------------------------------------------------------------------------
+// IPC : achats de matieres premieres (voir electron/achats.js)
+//
+// Flux : une photo de facture fournisseur, prise au telephone, est deposee
+// par l'utilisateur (page mobile separee, voir mobile/) dans le sous-dossier
+// Drive ACHATS_PHOTOS_DOSSIER, avec son propre compte Google - jamais avec
+// le compte de service utilise ici. Ce poste la retrouve (achats:
+// listPhotosEnAttente), l'analyse par OCR pour deviner le montant
+// (achats:analyserPhoto), puis enregistre l'achat une fois le montant/la
+// date confirmes par l'utilisateur (achats:enregistrer).
+// --------------------------------------------------------------------------
+
+function mimeDepuisNomFichier(nom) {
+  const ext = String(nom || "").split(".").pop().toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "heic" || ext === "heif") return "image/heic";
+  return "image/jpeg";
+}
+
+async function telechargerPhotoEnDataUrl(fileId, nom) {
+  const buffer = await driveSync.telechargerFichierBinaire(fileId);
+  return `data:${mimeDepuisNomFichier(nom)};base64,${buffer.toString("base64")}`;
+}
+
+// Photos deposees sur Drive pas encore transformees en achat enregistre.
+ipcMain.handle("achats:listPhotosEnAttente", async () => {
+  if (!driveSync.estConfigure()) return [];
+  const fichiers = await driveSync.listerFichiersDossier(ACHATS_PHOTOS_DOSSIER);
+  const dejaTraites = photoFileIdsDejaTraites();
+  return fichiers.filter((f) => !dejaTraites.has(f.id));
+});
+
+// Telecharge une photo en attente et tente d'en deviner le montant total par
+// OCR (voir electron/lib/achatOcr.js) - renvoie toujours une photo
+// affichable (dataUrl), montantDevine pouvant etre null si rien de fiable
+// n'a ete trouve (l'utilisateur saisit alors le montant a la main).
+ipcMain.handle("achats:analyserPhoto", async (_event, { fileId, nom }) => {
+  const buffer = await driveSync.telechargerFichierBinaire(fileId);
+  const dataUrl = `data:${mimeDepuisNomFichier(nom)};base64,${buffer.toString("base64")}`;
+  const { montantDevine } = await analyserImageAchat(buffer);
+  return { dataUrl, montantDevine };
+});
+
+ipcMain.handle("achats:list", () => listAchats());
+
+ipcMain.handle("achats:ouvrirPhoto", (_event, { fileId, nom }) => telechargerPhotoEnDataUrl(fileId, nom));
+
+ipcMain.handle("achats:enregistrer", async (_event, { date, montant, photoFileId, photoNom }) => {
+  const achat = addAchat({ date, montant, photoFileId, photoNom });
+  await synchroniserAchats();
+  return achat;
+});
+
+ipcMain.handle("achats:supprimer", async (_event, id) => {
+  deleteAchat(id);
+  await synchroniserAchats();
+});
 
 // --------------------------------------------------------------------------
 // IPC : catalogue de clients

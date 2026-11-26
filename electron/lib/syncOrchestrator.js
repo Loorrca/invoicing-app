@@ -1,8 +1,9 @@
 "use strict";
 
 // Orchestrateur de synchronisation entre postes : un cycle complet consiste,
-// pour chacune des 7 collections (entreprises, clients, articles, factures,
-// bons de livraison, articles suivis en stock, mouvements de stock), a
+// pour chacune des 8 collections (entreprises, clients, articles, factures,
+// bons de livraison, articles suivis en stock, mouvements de stock, achats
+// de matieres premieres), a
 // telecharger la version sur Drive (voir driveSync.js), la fusionner avec
 // la copie locale par id (voir syncMerge.js), puis a ecrire le resultat
 // fusionne localement ET a le renvoyer sur Drive — pour que Drive reflete
@@ -25,6 +26,7 @@ const articlesModule = require("../articles");
 const invoicesModule = require("../invoices");
 const bonsLivraisonModule = require("../bonsLivraison");
 const stockModule = require("../stock");
+const achatsModule = require("../achats");
 
 // Chaque collection : le nom du fichier sur Drive, comment lire la version
 // locale complete (tombstones inclus), et comment remplacer la version
@@ -68,6 +70,15 @@ const COLLECTIONS = [
     nom: "stockMouvements.json",
     listerLocal: () => stockModule.listAllMouvementsForSync(),
     remplacerLocal: (nouveaux) => stockModule.remplacerTousLesMouvements(nouveaux),
+  },
+  {
+    // Journal des achats de matieres premieres (voir electron/achats.js) :
+    // chaque achat a son propre id, jamais reecrit une fois enregistre
+    // (seule la suppression douce le modifie), donc jamais en conflit lors
+    // de la fusion — meme raisonnement que stockMouvements.json ci-dessus.
+    nom: "achats.json",
+    listerLocal: () => achatsModule.listAllForSync(),
+    remplacerLocal: (nouveaux) => achatsModule.remplacerTousLesAchats(nouveaux),
   },
 ];
 
@@ -214,9 +225,27 @@ async function synchroniserBonsLivraisonAvantNumerotation() {
   }
 }
 
+// Synchronise uniquement achats.json, utilise juste apres l'enregistrement
+// d'un nouvel achat (voir achats:enregistrer dans main.js) : on pousse tout
+// de suite sur Drive plutot que d'attendre le prochain cycle periodique (5
+// min), pour que l'achat soit visible sur l'autre poste des que possible.
+// Meme principe "best-effort" que les deux fonctions ci-dessus : un echec
+// reseau ici ne bloque jamais l'enregistrement local, deja fait avant cet
+// appel.
+async function synchroniserAchats() {
+  if (!estConfigure()) return;
+  const def = COLLECTIONS.find((c) => c.nom === "achats.json");
+  try {
+    await synchroniserCollection(def);
+  } catch (err) {
+    console.error("Sync Drive (achats) : echec, on continue avec les donnees locales :", err.message || err);
+  }
+}
+
 module.exports = {
   initSyncOrchestrator,
   executerCycleDeSync,
   synchroniserFacturesAvantNumerotation,
   synchroniserBonsLivraisonAvantNumerotation,
+  synchroniserAchats,
 };

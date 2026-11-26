@@ -40,8 +40,8 @@
 
   <h1>Scanner une facture d'achat</h1>
   <p class="hint">
-    Prenez la facture en photo : elle est envoyee directement dans le dossier Drive partage. Le montant est lu et
-    confirme ensuite sur l'ordinateur, dans l'onglet "Achats".
+    Prenez la facture en photo, ou choisissez-en une deja prise : elle est envoyee directement dans le dossier Drive
+    partage. Le montant est lu et confirme ensuite sur l'ordinateur, dans l'onglet "Achats".
   </p>
 
   <div class="card" id="carteConnexion">
@@ -50,8 +50,8 @@
   </div>
 
   <div class="card" id="carteCapture" style="display:none">
-    <label class="capture-label" for="inputPhoto">📷 Prendre une photo</label>
-    <input type="file" accept="image/*" capture="environment" id="inputPhoto" />
+    <label class="capture-label" for="inputPhoto">📷 Prendre une photo ou choisir dans la galerie</label>
+    <input type="file" accept="image/*" id="inputPhoto" />
     <img class="preview" id="apercu" style="display:none" />
     <button class="primary" id="boutonEnvoyer" style="display:none">Envoyer</button>
     <button class="secondary" id="boutonReprendre" style="display:none">Reprendre une photo</button>

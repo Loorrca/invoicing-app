@@ -29,6 +29,17 @@ const COMPANY_DEFAULTS = {
   // Gabarit de facture ("classic" ou "lignes" — voir invoiceTemplate.js) :
   // "classic" par defaut pour toute nouvelle entreprise.
   invoice_template: "classic",
+  // Gabarit de bon de livraison ("texbanner" ou "masterflag" — voir
+  // electron/lib/bonLivraisonTemplate.js). Demande explicite de
+  // l'utilisateur : TEXBANNER et MASTERFLAG doivent avoir des bons de
+  // livraison visuellement tres differents, pour qu'un tiers ne devine pas
+  // qu'il s'agit du meme groupe. "texbanner" par defaut pour toute nouvelle
+  // entreprise (voir aussi devinerGabaritParNom dans bonLivraisonTemplate.js
+  // pour les entreprises deja existantes pas encore migrees).
+  bon_livraison_template: "texbanner",
+  // Courte description de l'activite, affichee en accroche sous le nom de
+  // l'entreprise sur le bon de livraison (voir bonLivraisonTemplate.js).
+  activite: "",
 };
 
 let filePath = null;
@@ -71,6 +82,37 @@ function migrateInvoiceTemplates(companies) {
   });
 }
 
+// Migration ponctuelle (demande explicite de l'utilisateur, redesign du bon
+// de livraison) : assigne un gabarit "texbanner"/"masterflag" et une
+// accroche d'activite par defaut aux deux entreprises existantes, une seule
+// fois (meme logique que migrateInvoiceTemplates ci-dessus). N'ecrase jamais
+// une valeur deja presente (saisie utilisateur ou migration anterieure) ;
+// les entreprises qui ne s'appellent ni TEXBANNER ni MASTERFLAG retombent
+// sur la valeur par defaut de COMPANY_DEFAULTS ("texbanner" + accroche
+// vide), deja geree par newCompany/COMPANY_DEFAULTS pour toute entreprise
+// n'ayant jamais ete sauvegardee.
+function migrateBonLivraisonTemplates(companies) {
+  return companies.map((c) => {
+    if (c.bon_livraison_template && c.activite !== undefined && c.activite !== "") return c;
+    const nom = (c.company_name || "").trim().toUpperCase();
+    if (nom === "TEXBANNER") {
+      return {
+        ...c,
+        bon_livraison_template: c.bon_livraison_template || "texbanner",
+        activite: c.activite || "Fabrication de drapeaux, banderoles et articles publicitaires sur mesure",
+      };
+    }
+    if (nom === "MASTERFLAG") {
+      return {
+        ...c,
+        bon_livraison_template: c.bon_livraison_template || "masterflag",
+        activite: c.activite || "Fabrication · Drapeaux · Banderoles · Winflag · Articles Publicitaires",
+      };
+    }
+    return c.bon_livraison_template ? c : { ...c, bon_livraison_template: "texbanner" };
+  });
+}
+
 function load() {
   let raw = null;
   try {
@@ -110,7 +152,7 @@ function load() {
 
   const activeExists = raw.companies.some((c) => c.id === raw.active_company_id);
   return {
-    companies: migrateInvoiceTemplates(raw.companies),
+    companies: migrateBonLivraisonTemplates(migrateInvoiceTemplates(raw.companies)),
     active_company_id: activeExists ? raw.active_company_id : raw.companies[0].id,
   };
 }

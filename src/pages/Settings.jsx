@@ -14,6 +14,8 @@ const EMPTY = {
   qr_data_url: "",
   logo_bw_data_url: "",
   invoice_template: "classic",
+  bon_livraison_template: "texbanner",
+  activite: "",
 };
 
 // Redimensionne l'image choisie (hauteur max 300px) avant de la stocker, pour
@@ -343,6 +345,20 @@ export default function Settings({ activeCompany, onSaved }) {
             value={values.address}
             onChange={(e) => update("address", e.target.value)}
           />
+        </label>
+
+        <label className="full">
+          Activite (accroche affichee sur le bon de livraison)
+          <input
+            type="text"
+            value={values.activite}
+            onChange={(e) => update("activite", e.target.value)}
+            placeholder="Ex. Fabrication de drapeaux, banderoles et articles publicitaires sur mesure"
+          />
+          <span className="field-hint">
+            Courte description de l'activite, affichee sous le nom de l'entreprise (ou en accroche)
+            sur le bon de livraison. N'apparait pas sur la facture.
+          </span>
         </label>
 
         <div className="actions">

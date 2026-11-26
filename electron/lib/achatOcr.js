@@ -72,8 +72,7 @@ function parserNombre(brut) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Trouve tous les nombres "montant-like" (au moins un chiffre, eventuellement
-// groupe par milliers, avec ou sans decimales) dans une ligne de texte OCR.
+// Tous les nombres "montant-like" (avec ou sans decimales) d'une ligne.
 const RE_NOMBRE = /\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{1,3})?|\d+(?:[.,]\d{1,3})?/g;
 
 function nombresDansLigne(ligne) {
@@ -81,10 +80,173 @@ function nombresDansLigne(ligne) {
   return trouves.map(parserNombre).filter((n) => n !== null && n > 0);
 }
 
-// Applique l'heuristique de devinette sur le texte brut reconnu par l'OCR.
+// Uniquement les nombres AVEC decimales (ex. "197,945" mais pas "98619811").
+// Un numero de telephone, un matricule fiscal ou un numero de facture sont
+// des suites de chiffres SANS virgule/point decimal : les exclure ainsi
+// evite de les confondre avec un montant (bug observe : un numero de
+// telephone pris pour le plus gros montant de la page).
+const RE_NOMBRE_DECIMAL = /\d{1,3}(?:[ .]\d{3})*[.,]\d{1,3}/g;
+
+function nombresDecimauxDansLigne(ligne) {
+  const trouves = ligne.match(RE_NOMBRE_DECIMAL) || [];
+  return trouves.map(parserNombre).filter((n) => n !== null && n > 0);
+}
+
+// --------------------------------------------------------------------------
+// Montant en toutes lettres (ex. "cent quatre vingt dix sept dinars neuf
+// cent quarante cinq millimes") - demande explicite de l'utilisateur : une
+// facture tunisienne porte presque toujours aussi son montant ecrit en
+// toutes lettres ("Arretee la presente facture a la somme de : ..."), un
+// texte qui ne peut pas etre confondu avec un numero de telephone, une date
+// ou un matricule fiscal comme peut l'etre une suite de chiffres imprimes -
+// voir le bug ci-dessus. Verifie EN PREMIER, avant toute lecture de
+// chiffres, des que l'OCR est assez propre pour la reconnaitre.
+// --------------------------------------------------------------------------
+
+const MOTS_NOMBRES = {
+  zero: 0,
+  un: 1,
+  une: 1,
+  deux: 2,
+  trois: 3,
+  quatre: 4,
+  cinq: 5,
+  six: 6,
+  sept: 7,
+  huit: 8,
+  neuf: 9,
+  dix: 10,
+  onze: 11,
+  douze: 12,
+  treize: 13,
+  quatorze: 14,
+  quinze: 15,
+  seize: 16,
+  vingt: 20,
+  trente: 30,
+  quarante: 40,
+  cinquante: 50,
+  soixante: 60,
+};
+
+// Normalise un segment de texte en liste de mots (minuscules, sans accents,
+// tirets traites comme des espaces, tout ce qui n'est pas une lettre retire).
+function nettoyerMots(segment) {
+  return sansAccents(segment)
+    .replace(/-/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+// Seuls "cent(s)" et "vingt(s)" prennent un "s" au pluriel parmi les
+// mots-nombres (ex. "quatre-vingts", "trois cents") : un simple retrait du
+// "s" final sur TOUT mot casserait "trois" (3) en "troi", qui n'est reconnu
+// nulle part. On ne normalise donc que ces deux-la, explicitement.
+function normaliserMotNombre(mot) {
+  if (mot === "cents") return "cent";
+  if (mot === "vingts") return "vingt";
+  return mot;
+}
+
+// Convertit une suite de mots-nombres francais en valeur entiere, ou null si
+// aucun mot-nombre reconnu n'a ete trouve dans la suite (un mot inconnu,
+// bruit d'OCR ou mot de liaison, est simplement ignore plutot que de faire
+// echouer tout le parsing). Couvre 0-999999, largement suffisant ici (un
+// montant d'achat de matieres premieres ne depasse pas quelques milliers de
+// dinars).
+function motsVersNombre(mots) {
+  let total = 0;
+  let groupe = 0;
+  let trouve = false;
+
+  for (let i = 0; i < mots.length; i++) {
+    const mot = normaliserMotNombre(mots[i]);
+    if (mot === "et" || !mot) continue;
+
+    // "quatre-vingt(s)" = 4 x 20 = 80 (seul cas multiplicatif parmi les
+    // dizaines ; "soixante-dix" etc. sont de simples additions, deja
+    // couvertes par la boucle normale : soixante(60) + dix(10) = 70).
+    const suivant = mots[i + 1] ? normaliserMotNombre(mots[i + 1]) : null;
+    if (mot === "quatre" && suivant === "vingt") {
+      groupe += 80;
+      i++;
+      trouve = true;
+      continue;
+    }
+
+    if (mot in MOTS_NOMBRES) {
+      groupe += MOTS_NOMBRES[mot];
+      trouve = true;
+      continue;
+    }
+    if (mot === "cent") {
+      groupe = (groupe || 1) * 100;
+      trouve = true;
+      continue;
+    }
+    if (mot === "mille" || mot === "mil") {
+      total += (groupe || 1) * 1000;
+      groupe = 0;
+      trouve = true;
+      continue;
+    }
+    // Mot non reconnu ("dinars", "virgule", bruit OCR...) : ignore.
+  }
+
+  if (!trouve) return null;
+  return total + groupe;
+}
+
+// Cherche un montant ecrit en toutes lettres autour du mot "dinar(s)" dans
+// le texte OCR complet, et le convertit en valeur numerique (dinars +
+// millimes/1000). Renvoie null si aucun "dinar(s)" trouve, ou si les mots
+// juste avant ne forment pas un nombre reconnu.
+function montantDepuisLettres(texteOcr) {
+  const texte = sansAccents(texteOcr).replace(/-/g, " ");
+  const matchDinar = texte.match(/dinars?/);
+  if (!matchDinar) return null;
+
+  const indexDinar = matchDinar.index;
+  // Une dizaine de mots avant "dinar(s)" suffit largement a couvrir meme un
+  // montant de plusieurs milliers de dinars ecrit en toutes lettres, sans
+  // risquer de remonter jusqu'a des chiffres sans rapport plus haut dans le
+  // texte (en-tete, numero de facture...).
+  const avant = nettoyerMots(texte.slice(Math.max(0, indexDinar - 120), indexDinar)).slice(-12);
+  const dinars = motsVersNombre(avant);
+  if (dinars === null) return null;
+
+  let millimes = 0;
+  const apres = texte.slice(matchDinar.index + matchDinar[0].length, matchDinar.index + matchDinar[0].length + 120);
+  const matchMillime = apres.match(/millimes?/);
+  if (matchMillime) {
+    const segment = apres.slice(0, matchMillime.index);
+    // Les millimes sont parfois imprimes en chiffres plutot qu'en toutes
+    // lettres (ex. "... Dinars 945 Millimes") : on essaie d'abord cette
+    // lecture, plus fiable quand elle est disponible.
+    const enChiffres = segment.match(/\d+/);
+    if (enChiffres) {
+      millimes = parseInt(enChiffres[0], 10);
+    } else {
+      const valeur = motsVersNombre(nettoyerMots(segment));
+      if (valeur !== null) millimes = valeur;
+    }
+  }
+
+  return dinars + millimes / 1000;
+}
+
+// Applique l'heuristique complete de devinette sur le texte brut reconnu
+// par l'OCR, par ordre de confiance decroissant : montant en toutes lettres
+// (le plus fiable) > ligne contenant un mot-cle de total > plus gros
+// montant AVEC decimales trouve sur la page (jamais un entier brut, pour ne
+// pas prendre un numero de telephone ou un matricule pour un montant).
 // Exporte separement de analyserImageAchat pour pouvoir etre teste sans
 // dependre de tesseract.js (texte OCR simule en entree).
 function deviterMontant(texteOcr) {
+  const enLettres = montantDepuisLettres(texteOcr);
+  if (enLettres !== null && enLettres > 0) return enLettres;
+
   const lignes = String(texteOcr || "")
     .split("\n")
     .map((l) => l.trim())
@@ -93,18 +255,17 @@ function deviterMontant(texteOcr) {
   for (const motCle of MOTS_CLES_PRIORITE) {
     for (const ligne of lignes) {
       if (sansAccents(ligne).includes(motCle)) {
-        const nombres = nombresDansLigne(ligne);
-        if (nombres.length > 0) return nombres[nombres.length - 1];
+        const decimaux = nombresDecimauxDansLigne(ligne);
+        if (decimaux.length > 0) return decimaux[decimaux.length - 1];
+        const tousNombres = nombresDansLigne(ligne);
+        if (tousNombres.length > 0) return tousNombres[tousNombres.length - 1];
       }
     }
   }
 
-  // Aucun mot-cle trouve : a defaut, le plus grand montant repere sur
-  // l'ensemble du ticket est la meilleure devinette disponible (le total
-  // depasse presque toujours chaque ligne/sous-total pris individuellement).
   let max = null;
   for (const ligne of lignes) {
-    for (const n of nombresDansLigne(ligne)) {
+    for (const n of nombresDecimauxDansLigne(ligne)) {
       if (max === null || n > max) max = n;
     }
   }
@@ -128,4 +289,4 @@ async function analyserImageAchat(image) {
   }
 }
 
-module.exports = { analyserImageAchat, deviterMontant };
+module.exports = { analyserImageAchat, deviterMontant, montantDepuisLettres, motsVersNombre };

@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld("api", {
   ouvrirPhotoAchat: (fileId, nom) => ipcRenderer.invoke("achats:ouvrirPhoto", { fileId, nom }),
   enregistrerAchat: (fields) => ipcRenderer.invoke("achats:enregistrer", fields),
   supprimerAchat: (id) => ipcRenderer.invoke("achats:supprimer", id),
+  renommerPhotoAchat: (fileId, nouveauNom) => ipcRenderer.invoke("achats:renommerPhoto", { fileId, nouveauNom }),
+  supprimerPhotoAchat: (fileId) => ipcRenderer.invoke("achats:supprimerPhoto", fileId),
   exportBackup: () => ipcRenderer.invoke("backup:export"),
   importBackup: () => ipcRenderer.invoke("backup:import"),
   getLastBackupInfo: () => ipcRenderer.invoke("backup:getLastInfo"),

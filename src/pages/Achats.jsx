@@ -17,11 +17,22 @@ export default function Achats() {
   const [status, setStatus] = useState(null);
   const [confirmSuppressionId, setConfirmSuppressionId] = useState(null);
 
-  // Photo en cours de traitement (voir handleTraiter) : { fileId, nom,
-  // dataUrl, montant, date } pendant que l'utilisateur confirme/corrige le
-  // montant devine par l'OCR avant d'enregistrer l'achat.
+  // Renommage d'une photo encore en attente (voir startRenommage) : agit
+  // directement sur le fichier Drive, pour retrouver une facture plus
+  // facilement que par son nom auto-genere a l'envoi depuis le telephone.
+  const [renommageId, setRenommageId] = useState(null); // id Drive de la photo en cours de renommage
+  const [nouveauNomPhoto, setNouveauNomPhoto] = useState("");
+  const [confirmSuppressionPhotoId, setConfirmSuppressionPhotoId] = useState(null); // id Drive
+
+  // Photo en cours de traitement (voir handleTraiter) : { fileId,
+  // nomOriginal, nom, dataUrl, montant, date } pendant que l'utilisateur
+  // confirme/corrige le montant devine par l'OCR avant d'enregistrer
+  // l'achat. `nom` est modifiable (voir le champ dans la modale) : si
+  // different de `nomOriginal` au moment d'enregistrer, le fichier Drive est
+  // renomme en meme temps.
   const [traitement, setTraitement] = useState(null);
   const [traitementEnCours, setTraitementEnCours] = useState(false);
+  const [confirmSuppressionTraitementPhoto, setConfirmSuppressionTraitementPhoto] = useState(false);
 
   // Photo deja enregistree, affichee en grand (voir handleVoirPhoto) :
   // { nom, dataUrl }.
@@ -47,7 +58,8 @@ export default function Achats() {
   async function handleTraiter(photo) {
     setStatus(null);
     setTraitementEnCours(true);
-    setTraitement({ fileId: photo.id, nom: photo.name, dataUrl: "", montant: "", date: aujourdHui() });
+    setConfirmSuppressionTraitementPhoto(false);
+    setTraitement({ fileId: photo.id, nomOriginal: photo.name, nom: photo.name, dataUrl: "", montant: "", date: aujourdHui() });
     try {
       const { dataUrl, montantDevine } = await window.api.analyserPhotoAchat(photo.id, photo.name);
       setTraitement((t) =>
@@ -68,13 +80,57 @@ export default function Achats() {
     if (!traitement) return;
     setStatus(null);
     try {
+      const nomFinal = traitement.nom.trim() || traitement.nomOriginal;
+      if (nomFinal !== traitement.nomOriginal) {
+        await window.api.renommerPhotoAchat(traitement.fileId, nomFinal);
+      }
       await window.api.enregistrerAchat({
         date: traitement.date,
         montant: Number(traitement.montant),
         photoFileId: traitement.fileId,
-        photoNom: traitement.nom,
+        photoNom: nomFinal,
       });
       setTraitement(null);
+      await refresh();
+    } catch (err) {
+      setStatus({ kind: "error", text: String(err?.message || err) });
+    }
+  }
+
+  async function handleSupprimerPhotoTraitement() {
+    if (!traitement) return;
+    setStatus(null);
+    try {
+      await window.api.supprimerPhotoAchat(traitement.fileId);
+      setTraitement(null);
+      setConfirmSuppressionTraitementPhoto(false);
+      await refresh();
+    } catch (err) {
+      setStatus({ kind: "error", text: String(err?.message || err) });
+    }
+  }
+
+  function startRenommage(photo) {
+    setRenommageId(photo.id);
+    setNouveauNomPhoto(photo.name);
+  }
+
+  async function handleEnregistrerRenommage(photo) {
+    setStatus(null);
+    try {
+      await window.api.renommerPhotoAchat(photo.id, nouveauNomPhoto.trim() || photo.name);
+      setRenommageId(null);
+      await refresh();
+    } catch (err) {
+      setStatus({ kind: "error", text: String(err?.message || err) });
+    }
+  }
+
+  async function handleSupprimerPhotoEnAttente(fileId) {
+    setStatus(null);
+    try {
+      await window.api.supprimerPhotoAchat(fileId);
+      setConfirmSuppressionPhotoId(null);
       await refresh();
     } catch (err) {
       setStatus({ kind: "error", text: String(err?.message || err) });
@@ -135,12 +191,70 @@ export default function Achats() {
           <tbody>
             {photosEnAttente.map((p) => (
               <tr key={p.id}>
-                <td>{p.name}</td>
+                <td>
+                  {renommageId === p.id ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      value={nouveauNomPhoto}
+                      onChange={(e) => setNouveauNomPhoto(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleEnregistrerRenommage(p);
+                        if (e.key === "Escape") setRenommageId(null);
+                      }}
+                    />
+                  ) : (
+                    p.name
+                  )}
+                </td>
                 <td>{p.createdTime ? new Date(p.createdTime).toLocaleString("fr-FR") : "—"}</td>
                 <td className="invoices-actions">
-                  <button type="button" className="btn primary" onClick={() => handleTraiter(p)}>
-                    Traiter cette photo
-                  </button>
+                  {renommageId === p.id ? (
+                    <>
+                      <button type="button" className="btn secondary" onClick={() => handleEnregistrerRenommage(p)}>
+                        Enregistrer
+                      </button>
+                      <button type="button" className="btn secondary" onClick={() => setRenommageId(null)}>
+                        Annuler
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="btn primary" onClick={() => handleTraiter(p)}>
+                        Traiter cette photo
+                      </button>
+                      <button type="button" className="btn secondary" onClick={() => startRenommage(p)}>
+                        Renommer
+                      </button>
+                      {confirmSuppressionPhotoId === p.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn link"
+                            onClick={() => handleSupprimerPhotoEnAttente(p.id)}
+                          >
+                            Confirmer
+                          </button>
+                          <button
+                            type="button"
+                            className="btn secondary"
+                            onClick={() => setConfirmSuppressionPhotoId(null)}
+                          >
+                            Annuler
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn icon"
+                          onClick={() => setConfirmSuppressionPhotoId(p.id)}
+                          aria-label="Supprimer cette photo"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -204,7 +318,10 @@ export default function Achats() {
         <div
           className="modal-overlay"
           onClick={() => {
-            if (!traitementEnCours) setTraitement(null);
+            if (!traitementEnCours) {
+              setTraitement(null);
+              setConfirmSuppressionTraitementPhoto(false);
+            }
           }}
         >
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleEnregistrer}>
@@ -222,6 +339,14 @@ export default function Achats() {
               Montant devine automatiquement par lecture de la photo — verifiez-le et corrigez-le si besoin avant
               d&apos;enregistrer.
             </p>
+            <label>
+              Nom de la photo
+              <input
+                type="text"
+                value={traitement.nom}
+                onChange={(e) => setTraitement((t) => ({ ...t, nom: e.target.value }))}
+              />
+            </label>
             <label>
               Montant
               <input
@@ -246,9 +371,38 @@ export default function Achats() {
               <button type="submit" className="btn primary" disabled={!traitement.dataUrl}>
                 Enregistrer
               </button>
-              <button type="button" className="btn secondary" onClick={() => setTraitement(null)}>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setTraitement(null);
+                  setConfirmSuppressionTraitementPhoto(false);
+                }}
+              >
                 Annuler
               </button>
+              {confirmSuppressionTraitementPhoto ? (
+                <>
+                  <button type="button" className="btn link" onClick={handleSupprimerPhotoTraitement}>
+                    Confirmer la suppression
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => setConfirmSuppressionTraitementPhoto(false)}
+                  >
+                    Annuler
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn link"
+                  onClick={() => setConfirmSuppressionTraitementPhoto(true)}
+                >
+                  Supprimer cette photo
+                </button>
+              )}
             </div>
           </form>
         </div>

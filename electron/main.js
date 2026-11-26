@@ -535,6 +535,20 @@ ipcMain.handle("achats:supprimer", async (_event, id) => {
   await synchroniserAchats();
 });
 
+// Renomme une photo encore en attente (ou deja liee a un achat, peu
+// importe : le renommage agit directement sur le fichier Drive, par id, pas
+// sur l'achat local) - utile pour retrouver une facture plus facilement
+// qu'avec le nom auto-genere a l'envoi depuis le telephone.
+ipcMain.handle("achats:renommerPhoto", (_event, { fileId, nouveauNom }) =>
+  driveSync.renommerFichier(fileId, nouveauNom)
+);
+
+// Met a la corbeille une photo PAS ENCORE traitee (voir achats:
+// listPhotosEnAttente) - pour ecarter une photo ratee/en double sans avoir
+// a l'enregistrer comme achat. Ne touche a aucun achat local (il n'en
+// existe pas encore pour cette photo, par definition).
+ipcMain.handle("achats:supprimerPhoto", (_event, fileId) => driveSync.supprimerFichier(fileId));
+
 // --------------------------------------------------------------------------
 // IPC : catalogue de clients
 // --------------------------------------------------------------------------

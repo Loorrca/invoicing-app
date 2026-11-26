@@ -165,6 +165,31 @@ async function telechargerFichierBinaire(fileId) {
   return Buffer.from(arrayBuffer);
 }
 
+// Renomme un fichier Drive existant (ex. une photo d'achat en attente — voir
+// achats:renommerPhoto dans main.js) : une simple mise a jour de metadonnee,
+// autorisee pour le compte de service des qu'il a un acces Editeur sur le
+// fichier (contrairement a la CREATION d'un fichier, voir le commentaire sur
+// le scope "drive" plus haut, ceci ne touche a aucun quota).
+async function renommerFichier(fileId, nouveauNom) {
+  await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: nouveauNom }),
+  });
+}
+
+// Met un fichier Drive a la corbeille (jamais une suppression definitive :
+// le compte de service n'est pas proprietaire du fichier - cree par le
+// compte Google personnel de l'utilisateur depuis la page mobile - seule la
+// mise a la corbeille lui est autorisee, pas la suppression irreversible).
+async function supprimerFichier(fileId) {
+  await authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+}
+
 module.exports = {
   initDriveSync,
   estConfigure,
@@ -172,4 +197,6 @@ module.exports = {
   envoyerJson,
   listerFichiersDossier,
   telechargerFichierBinaire,
+  renommerFichier,
+  supprimerFichier,
 };

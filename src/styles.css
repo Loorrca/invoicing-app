@@ -343,6 +343,8 @@ table.lignes-editor input.qte-input {
 }
 .page-header-row .subtitle { margin-bottom: 0; }
 
+.page-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
 .dashboard-year-select { min-width: 110px; }
 
 .dashboard-year-select select {
@@ -468,6 +470,31 @@ tr.row-muted td { color: var(--muted); }
 .invoices-year-total { margin-left: auto; font-weight: 600; }
 
 .invoices-year-group .table-scroll { margin-top: 8px; }
+
+.achats-mois-liste {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.achats-mois-liste li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.achats-mois-label { font-size: 13.5px; }
+
+.achats-mois-montant { font-weight: 600; }
 
 .productions-filter {
   max-width: 220px;

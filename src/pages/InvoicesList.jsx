@@ -34,7 +34,7 @@ let dernierScrollTop = 0;
 // annees a la main).
 let expandedYearsMemoire = null;
 
-export default function InvoicesList({ onEdit }) {
+export default function InvoicesList({ onEdit, onNew }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -220,8 +220,15 @@ export default function InvoicesList({ onEdit }) {
 
   return (
     <div className="page page-xwide">
-      <h1>Factures</h1>
-      <p className="subtitle">Historique des factures generees pour l'entreprise active.</p>
+      <div className="page-header-row">
+        <div>
+          <h1>Factures</h1>
+          <p className="subtitle">Historique des factures generees pour l'entreprise active.</p>
+        </div>
+        <button type="button" className="btn primary" onClick={() => onNew?.()}>
+          + Nouveau
+        </button>
+      </div>
 
       <div className="invoices-search-row">
         <input

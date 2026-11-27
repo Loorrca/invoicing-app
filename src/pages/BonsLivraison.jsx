@@ -16,7 +16,7 @@ function formatDate(d) {
 let dernierScrollTop = 0;
 let expandedYearsMemoire = null;
 
-export default function BonsLivraison({ onEdit, onCreerFacture }) {
+export default function BonsLivraison({ onEdit, onCreerFacture, onNew }) {
   const [bons, setBons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -242,9 +242,14 @@ export default function BonsLivraison({ onEdit, onCreerFacture }) {
             facture correspondante (prix a renseigner sur l'onglet Facture).
           </p>
         </div>
-        <button type="button" className="btn primary" onClick={handleCreerFacture} disabled={nbSelectionnes === 0}>
-          Creer la facture{nbSelectionnes > 0 ? ` (${nbSelectionnes})` : ""}
-        </button>
+        <div className="page-header-actions">
+          <button type="button" className="btn secondary" onClick={() => onNew?.()}>
+            + Nouveau
+          </button>
+          <button type="button" className="btn primary" onClick={handleCreerFacture} disabled={nbSelectionnes === 0}>
+            Creer la facture{nbSelectionnes > 0 ? ` (${nbSelectionnes})` : ""}
+          </button>
+        </div>
       </div>
 
       <div className="invoices-search-row">

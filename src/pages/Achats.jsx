@@ -10,6 +10,13 @@ function formatMontant(n) {
   return v.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
+// "2026-11" -> "Novembre 2026", pour le regroupement mensuel ci-dessous.
+function formatMois(cleAnneeMois) {
+  const [annee, mois] = cleAnneeMois.split("-").map(Number);
+  const libelle = new Date(annee, mois - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  return libelle.charAt(0).toUpperCase() + libelle.slice(1);
+}
+
 export default function Achats() {
   const [achats, setAchats] = useState([]);
   const [photosEnAttente, setPhotosEnAttente] = useState([]);
@@ -54,6 +61,25 @@ export default function Achats() {
   }, []);
 
   const total = useMemo(() => achats.reduce((s, a) => s + (Number(a.montant) || 0), 0), [achats]);
+
+  // Regroupement par mois (ex. "Novembre 2026 : 1 240,500 DT") pour suivre
+  // l'evolution des depenses de matieres premieres dans le temps, plutot
+  // qu'un seul total cumule. Les achats sans date exploitable tombent dans
+  // un groupe "Sans date" place en dernier.
+  const parMois = useMemo(() => {
+    const totauxParCle = new Map();
+    for (const a of achats) {
+      const cle = /^\d{4}-\d{2}/.test(a.date || "") ? a.date.slice(0, 7) : "Sans date";
+      totauxParCle.set(cle, (totauxParCle.get(cle) || 0) + (Number(a.montant) || 0));
+    }
+    return [...totauxParCle.entries()]
+      .sort(([cleA], [cleB]) => {
+        if (cleA === "Sans date") return 1;
+        if (cleB === "Sans date") return -1;
+        return cleB.localeCompare(cleA);
+      })
+      .map(([cle, montant]) => ({ cle, label: cle === "Sans date" ? cle : formatMois(cle), montant }));
+  }, [achats]);
 
   async function handleTraiter(photo) {
     setStatus(null);
@@ -265,9 +291,19 @@ export default function Achats() {
       <h2 className="section-title" style={{ marginTop: "2em" }}>
         Historique des achats
         <span className="subtitle" style={{ display: "inline", marginLeft: "0.75em", fontWeight: 400 }}>
-          {achats.length > 0 ? `Total : ${formatMontant(total)}` : ""}
+          {achats.length > 0 ? `Total : ${formatMontant(total)} DT` : ""}
         </span>
       </h2>
+      {parMois.length > 0 && (
+        <ul className="achats-mois-liste">
+          {parMois.map((m) => (
+            <li key={m.cle}>
+              <span className="achats-mois-label">{m.label}</span>
+              <span className="achats-mois-montant">{formatMontant(m.montant)} DT</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {achats.length === 0 ? (
         <p className="subtitle">Aucun achat enregistre pour le moment.</p>
       ) : (

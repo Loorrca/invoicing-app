@@ -16,10 +16,8 @@ import Achats from "./pages/Achats.jsx";
 const TABS = [
   { id: "settings", label: "Entreprise" },
   { id: "dashboard", label: "Tableau de bord" },
-  { id: "invoice", label: "Nouvelle facture" },
   { id: "clients", label: "Clients" },
   { id: "invoices", label: "Factures" },
-  { id: "bonLivraison", label: "Nouveau bon de livraison" },
   { id: "bonsLivraison", label: "Bons de livraison" },
   { id: "stock", label: "Stock" },
   { id: "achats", label: "Achats" },
@@ -29,6 +27,13 @@ const TABS = [
 ];
 
 const ADD_COMPANY = "__add__";
+
+// Les formulaires "Nouvelle facture"/"Nouveau bon de livraison" ne sont plus
+// des onglets a part entiere dans la barre laterale (voir TABS ci-dessus) -
+// on y accede desormais via le bouton "+ Nouveau" sur Factures/Bons de
+// livraison. On garde neanmoins l'onglet correspondant actif visuellement
+// pendant qu'on y est, pour que l'utilisateur reste repere dans la barre.
+const TAB_PARENT = { invoice: "invoices", bonLivraison: "bonsLivraison" };
 
 export default function App() {
   const [tab, setTab] = useState("settings");
@@ -103,15 +108,8 @@ export default function App() {
           {TABS.map((t) => (
             <li key={t.id}>
               <button
-                className={t.id === tab ? "nav-item active" : "nav-item"}
-                onClick={() => {
-                  if (t.id === "invoice") {
-                    setEditingInvoiceId(null);
-                    setInvoiceDraft(null);
-                  }
-                  if (t.id === "bonLivraison") setEditingBonLivraisonId(null);
-                  setTab(t.id);
-                }}
+                className={t.id === tab || TAB_PARENT[tab] === t.id ? "nav-item active" : "nav-item"}
+                onClick={() => setTab(t.id)}
               >
                 {t.label}
               </button>
@@ -147,6 +145,11 @@ export default function App() {
               setEditingInvoiceId(id);
               setTab("invoice");
             }}
+            onNew={() => {
+              setEditingInvoiceId(null);
+              setInvoiceDraft(null);
+              setTab("invoice");
+            }}
           />
         )}
         {tab === "bonLivraison" && (
@@ -171,6 +174,10 @@ export default function App() {
             key={activeCompany?.id}
             onEdit={(id) => {
               setEditingBonLivraisonId(id);
+              setTab("bonLivraison");
+            }}
+            onNew={() => {
+              setEditingBonLivraisonId(null);
               setTab("bonLivraison");
             }}
             onCreerFacture={(draft) => {
